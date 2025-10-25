@@ -1,10 +1,11 @@
+import type { BoundingBox } from '../types';
 
 const loadImage = (base64: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = reject;
-        img.src = `data:image/jpeg;base64,${base64}`; // Assume a common format, browser will handle it
+        img.src = `data:image/png;base64,${base64}`; // Preprocessed image is always PNG
     });
 };
 
@@ -153,3 +154,24 @@ export const preprocessImage = async (imageBase64: string): Promise<string> => {
     // Return as a PNG base64 string
     return canvas.toDataURL('image/png').split(',')[1];
 };
+
+/**
+ * Crops an image using the provided bounding box.
+ * @param imageBase64 The base64 encoded source image to crop.
+ * @param box The bounding box with x, y, width, and height.
+ * @returns A promise that resolves with the base64 encoded, cropped PNG image.
+ */
+export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<string> => {
+    const img = await loadImage(imageBase64);
+    const canvas = document.createElement('canvas');
+    canvas.width = box.width;
+    canvas.height = box.height;
+    const ctx = canvas.getContext('2d');
+     if (!ctx) {
+        throw new Error('Could not get canvas context for cropping');
+    }
+    // Draw the relevant part of the source image onto the new, smaller canvas
+    ctx.drawImage(img, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+
+    return canvas.toDataURL('image/png').split(',')[1];
+}

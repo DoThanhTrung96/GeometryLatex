@@ -1,4 +1,3 @@
-
 export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'VERIFYING' | 'DONE' | 'ERROR';
 
 export interface Vertex {
@@ -18,9 +17,17 @@ export interface GeometryData {
   labels: { label: string; coords: [number, number] }[];
 }
 
+export interface BoundingBox {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
 export interface AnalysisResult {
-  isolatedGeometrySVG: string;
+  boundingBox: BoundingBox;
   geometryData: GeometryData;
+  confidenceScore: number;
 }
 
 export interface LatexResult {

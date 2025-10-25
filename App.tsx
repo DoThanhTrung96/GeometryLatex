@@ -1,7 +1,6 @@
-
 import React, { useState, useCallback } from 'react';
 import { analyzeGeometry, generateLatex } from './services/geminiService';
-import { preprocessImage } from './services/imageProcessing';
+import { preprocessImage, cropImage } from './services/imageProcessing';
 import type { AnalysisResult, GeometryData, ProcessingStep } from './types';
 import { ImageUploader } from './components/ImageUploader';
 import { StepDisplay } from './components/StepDisplay';
@@ -9,9 +8,40 @@ import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, UploadIcon } from './components/icons';
 
+const ConfidenceIndicator: React.FC<{ score: number }> = ({ score }) => {
+  const percentage = Math.round(score * 100);
+  let colorClass = 'bg-green-500';
+  
+  if (score < 0.7) {
+    colorClass = 'bg-red-500';
+  } else if (score < 0.9) {
+    colorClass = 'bg-yellow-500';
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1 text-sm">
+        <span className="font-semibold text-slate-300">AI Confidence Score</span>
+        <span className="font-bold text-white">{percentage}%</span>
+      </div>
+      <div className="w-full bg-slate-700 rounded-full h-2.5">
+        <div 
+          className={`${colorClass} h-2.5 rounded-full transition-all duration-500`} 
+          style={{ width: `${percentage}%` }}
+          role="progressbar"
+          aria-valuenow={percentage}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        ></div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [image, setImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [isPreprocessing, setIsPreprocessing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [latexCode, setLatexCode] = useState<string | null>(null);
@@ -21,6 +51,7 @@ export default function App() {
   const resetState = () => {
     setImage(null);
     setProcessedImage(null);
+    setCroppedImage(null);
     setAnalysisResult(null);
     setLatexCode(null);
     setError(null);
@@ -67,11 +98,16 @@ export default function App() {
     setCurrentStep('ANALYZING');
     setError(null);
     setAnalysisResult(null);
+    setCroppedImage(null);
     setLatexCode(null);
 
     try {
       const analysis: AnalysisResult = await analyzeGeometry(processedImage, 'image/png');
       setAnalysisResult(analysis);
+      
+      const cropped = await cropImage(processedImage, analysis.boundingBox);
+      setCroppedImage(cropped);
+
       setCurrentStep('VERIFYING');
 
       const latexResult = await generateLatex(analysis.geometryData);
@@ -91,11 +127,11 @@ export default function App() {
 
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        {analysisResult?.isolatedGeometrySVG && (
+        {croppedImage && (
           <ResultCard title="1. Isolated Geometry">
             <div className="bg-white rounded-lg p-4 flex justify-center items-center">
               <img 
-                src={`data:image/svg+xml;base64,${btoa(analysisResult.isolatedGeometrySVG)}`} 
+                src={`data:image/png;base64,${croppedImage}`} 
                 alt="Isolated Geometry" 
                 className="max-w-full h-auto"
               />
@@ -104,6 +140,9 @@ export default function App() {
         )}
         {analysisResult?.geometryData && (
           <ResultCard title="2. Extracted Data & Line Types">
+            {typeof analysisResult.confidenceScore === 'number' && (
+              <ConfidenceIndicator score={analysisResult.confidenceScore} />
+            )}
             <CodeBlock language="json" code={JSON.stringify(analysisResult.geometryData, null, 2)} />
           </ResultCard>
         )}
