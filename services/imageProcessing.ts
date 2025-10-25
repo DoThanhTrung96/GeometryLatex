@@ -5,7 +5,8 @@ const loadImage = (base64: string): Promise<HTMLImageElement> => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = reject;
-        img.src = `data:image/png;base64,${base64}`; // Preprocessed image is always PNG
+        // The source can be any format, but the preprocessed result will be PNG.
+        img.src = `data:image/unknown;base64,${base64}`;
     });
 };
 
@@ -21,100 +22,41 @@ const toGrayscale = (ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.putImageData(imageData, 0, 0);
 };
 
-const convolve = (ctx: CanvasRenderingContext2D, width: number, height: number, kernel: number[][]) => {
-    const src = ctx.getImageData(0, 0, width, height);
-    const srcData = src.data;
-    const dst = ctx.createImageData(width, height);
-    const dstData = dst.data;
-    
-    const kernelSize = kernel.length;
-    const halfKernel = Math.floor(kernelSize / 2);
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const dstOff = (y * width + x) * 4;
-            let r = 0, g = 0, b = 0;
-            
-            for (let ky = 0; ky < kernelSize; ky++) {
-                for (let kx = 0; kx < kernelSize; kx++) {
-                    const sy = Math.min(height - 1, Math.max(0, y + ky - halfKernel));
-                    const sx = Math.min(width - 1, Math.max(0, x + kx - halfKernel));
-                    const srcOff = (sy * width + sx) * 4;
-                    const wt = kernel[ky][kx];
-                    r += srcData[srcOff] * wt;
-                    g += srcData[srcOff + 1] * wt;
-                    b += srcData[srcOff + 2] * wt;
-                }
-            }
-            dstData[dstOff] = r;
-            dstData[dstOff + 1] = g;
-            dstData[dstOff + 2] = b;
-            dstData[dstOff + 3] = 255; // alpha
-        }
-    }
-    ctx.putImageData(dst, 0, 0);
-}
-
-const sobelFilter = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const grayscale = ctx.getImageData(0, 0, width, height);
-    const sobelData = ctx.createImageData(width, height);
-    const sobelPixels = sobelData.data;
-    const data = grayscale.data;
-
-    const kernelX = [
-        [-1, 0, 1],
-        [-2, 0, 2],
-        [-1, 0, 1]
-    ];
-    const kernelY = [
-        [-1, -2, -1],
-        [0, 0, 0],
-        [1, 2, 1]
-    ];
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const i = (y * width + x) * 4;
-            let pixelX = 0;
-            let pixelY = 0;
-
-            for (let ky = 0; ky < 3; ky++) {
-                for (let kx = 0; kx < 3; kx++) {
-                    const sy = Math.min(height - 1, Math.max(0, y + ky - 1));
-                    const sx = Math.min(width - 1, Math.max(0, x + kx - 1));
-                    const srcOff = (sy * width + sx) * 4;
-                    const weightX = kernelX[ky][kx];
-                    const weightY = kernelY[ky][kx];
-                    pixelX += data[srcOff] * weightX;
-                    pixelY += data[srcOff] * weightY;
-                }
-            }
-            const magnitude = Math.sqrt(pixelX * pixelX + pixelY * pixelY) >>> 0;
-            sobelPixels[i] = magnitude;
-            sobelPixels[i + 1] = magnitude;
-            sobelPixels[i + 2] = magnitude;
-            sobelPixels[i + 3] = 255;
-        }
-    }
-    ctx.putImageData(sobelData, 0, 0);
-};
-
-const binarize = (ctx: CanvasRenderingContext2D, width: number, height: number, threshold: number) => {
+/**
+ * Binarizes the image based on a threshold and inverts the colors.
+ * Assumes a grayscale image is on the canvas.
+ * This turns dark lines on a light background into bright white lines on a black background.
+ * @param ctx The canvas rendering context.
+ * @param width The width of the canvas.
+ * @param height The height of the canvas.
+ */
+const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
+    const threshold = 128; // Pixels darker than this are considered part of a line.
+
     for (let i = 0; i < data.length; i += 4) {
-        const val = data[i] > threshold ? 255 : 0;
-        data[i] = val;
-        data[i+1] = val;
-        data[i+2] = val;
+        // data[i] is the grayscale value because toGrayscale was called first.
+        const grayValue = data[i];
+
+        // If the pixel is darker than the threshold, it's part of the geometry (make it white).
+        // If it's lighter, it's part of the background (make it black).
+        const finalValue = grayValue < threshold ? 255 : 0;
+
+        data[i] = finalValue;     // red
+        data[i + 1] = finalValue; // green
+        data[i + 2] = finalValue; // blue
+        // Alpha remains 255.
     }
     ctx.putImageData(imageData, 0, 0);
 };
 
 
 /**
- * Applies a series of filters to an image to prepare it for geometry analysis.
- * The pipeline is: Grayscale -> Gaussian Blur -> Sobel Edge Detection -> Binarization
+ * Applies a robust series of filters to an image to prepare it for geometry analysis.
+ * The new pipeline is: Grayscale -> Binarize & Invert.
+ * This creates a high-contrast, clean image with solid white features on a solid black background,
+ * which is much more reliable for AI analysis than edge detection.
  * @param imageBase64 The base64 encoded source image.
  * @returns A promise that resolves with the base64 encoded, preprocessed PNG image.
  */
@@ -129,29 +71,15 @@ export const preprocessImage = async (imageBase64: string): Promise<string> => {
     }
     ctx.drawImage(img, 0, 0);
 
-    // 1. Grayscale
+    // 1. Convert to grayscale to work with a single channel for thresholding.
     toGrayscale(ctx, canvas.width, canvas.height);
 
-    // 2. Gaussian Blur for noise reduction
-    const gaussianKernel = [
-      [1/16, 2/16, 1/16],
-      [2/16, 4/16, 2/16],
-      [1/16, 2/16, 1/16]
-    ];
-    convolve(ctx, canvas.width, canvas.height, gaussianKernel);
+    // 2. Binarize and Invert the image. This makes the geometry lines solid white and
+    // the background solid black, providing a very clear input for the AI model to analyze.
+    // This new method is far more effective than the previous edge detection filter.
+    binarizeAndInvert(ctx, canvas.width, canvas.height);
     
-    // 3. Sobel Filter for edge enhancement
-    sobelFilter(ctx, canvas.width, canvas.height);
-
-    // 4. Binarize the result for a clean black & white edge map
-    binarize(ctx, canvas.width, canvas.height, 50); // Threshold of 50
-
-    // Invert colors for better visibility for the AI (black lines on white background)
-    ctx.globalCompositeOperation = 'difference';
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Return as a PNG base64 string
+    // Return as a PNG base64 string for lossless transmission to the AI.
     return canvas.toDataURL('image/png').split(',')[1];
 };
 
@@ -162,7 +90,8 @@ export const preprocessImage = async (imageBase64: string): Promise<string> => {
  * @returns A promise that resolves with the base64 encoded, cropped PNG image.
  */
 export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<string> => {
-    const img = await loadImage(imageBase64);
+    // We load the preprocessed image, which is guaranteed to be a PNG from our pipeline
+    const img = await loadImage(`data:image/png;base64,${imageBase64}`);
     const canvas = document.createElement('canvas');
     canvas.width = box.width;
     canvas.height = box.height;
@@ -173,5 +102,6 @@ export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<
     // Draw the relevant part of the source image onto the new, smaller canvas
     ctx.drawImage(img, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
 
+    // Using image/png for lossless cropping
     return canvas.toDataURL('image/png').split(',')[1];
 }

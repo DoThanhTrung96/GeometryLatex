@@ -1,226 +1,164 @@
 import React, { useState, useCallback } from 'react';
-import { analyzeGeometry, generateLatex } from './services/geminiService';
-import { preprocessImage, cropImage } from './services/imageProcessing';
-import type { AnalysisResult, GeometryData, ProcessingStep } from './types';
 import { ImageUploader } from './components/ImageUploader';
 import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
-import { LogoIcon, UploadIcon } from './components/icons';
+import { LogoIcon } from './components/icons';
+import { preprocessImage, cropImage } from './services/imageProcessing';
+import { analyzeGeometry, generateLatex } from './services/geminiService';
+import type { ProcessingStep, AnalysisResult, LatexResult } from './types';
 
-const ConfidenceIndicator: React.FC<{ score: number }> = ({ score }) => {
+const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
-  let colorClass = 'bg-green-500';
-  
-  if (score < 0.7) {
-    colorClass = 'bg-red-500';
-  } else if (score < 0.9) {
-    colorClass = 'bg-yellow-500';
-  }
+  const getColor = () => {
+    if (score >= 0.9) return { bar: 'bg-green-500', text: 'text-green-400' };
+    if (score >= 0.7) return { bar: 'bg-yellow-500', text: 'text-yellow-400' };
+    return { bar: 'bg-red-500', text: 'text-red-400' };
+  };
+
+  const { bar, text } = getColor();
 
   return (
-    <div className="mb-4">
-      <div className="flex justify-between items-center mb-1 text-sm">
-        <span className="font-semibold text-slate-300">AI Confidence Score</span>
-        <span className="font-bold text-white">{percentage}%</span>
+    <div className="flex flex-col justify-center h-full">
+      <div className="flex justify-between items-center mb-1 font-mono">
+        <span className="text-base font-medium text-slate-300">Confidence</span>
+        <span className={`text-lg font-bold ${text}`}>{percentage}%</span>
       </div>
-      <div className="w-full bg-slate-700 rounded-full h-2.5">
-        <div 
-          className={`${colorClass} h-2.5 rounded-full transition-all duration-500`} 
-          style={{ width: `${percentage}%` }}
-          role="progressbar"
-          aria-valuenow={percentage}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        ></div>
+      <div className="w-full bg-slate-700 rounded-full h-4 border border-slate-600">
+        <div className={`${bar} h-full rounded-full transition-all duration-500`} style={{ width: `${percentage}%` }}></div>
       </div>
+      <p className="text-xs text-slate-500 mt-2 text-center">
+        This score reflects the AI's confidence in its geometric analysis.
+      </p>
     </div>
   );
 };
 
-export default function App() {
-  const [image, setImage] = useState<string | null>(null);
-  const [processedImage, setProcessedImage] = useState<string | null>(null);
-  const [croppedImage, setCroppedImage] = useState<string | null>(null);
-  const [isPreprocessing, setIsPreprocessing] = useState<boolean>(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [latexCode, setLatexCode] = useState<string | null>(null);
+
+function App() {
+  const [step, setStep] = useState<ProcessingStep>('IDLE');
   const [error, setError] = useState<string | null>(null);
-  const [currentStep, setCurrentStep] = useState<ProcessingStep>('IDLE');
+  const [isPreprocessing, setIsPreprocessing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
 
-  const resetState = () => {
-    setImage(null);
-    setProcessedImage(null);
-    setCroppedImage(null);
-    setAnalysisResult(null);
-    setLatexCode(null);
+  const handleImageUpload = useCallback(async (file: File) => {
+    setStep('READY');
     setError(null);
-    setCurrentStep('IDLE');
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = error => reject(error);
-    });
-  };
-
-  const handleImageUpload = async (file: File) => {
-    resetState();
+    setAnalysisResult(null);
+    setLatexResult(null);
+    setCroppedImage(null);
     setIsPreprocessing(true);
-    
+
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+                if (typeof reader.result === 'string') {
+                    resolve(reader.result.split(',')[1]);
+                } else {
+                    reject(new Error('Failed to read file as data URL.'));
+                }
+            };
+            reader.onerror = (error) => reject(error);
+        });
+    };
+
     try {
-        const base64String = await fileToBase64(file);
-        setImage(base64String); // For original preview
-
-        const processed = await preprocessImage(base64String);
-        setProcessedImage(processed);
-
-        setCurrentStep('READY');
-    } catch (err) {
-        console.error(err);
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-        setError(`Failed to load or preprocess image: ${errorMessage}`);
-        setCurrentStep('ERROR');
-    } finally {
+        const base64 = await fileToBase64(file);
+        const preprocessedBase64 = await preprocessImage(base64);
         setIsPreprocessing(false);
-    }
-  };
 
-  const processGeometry = useCallback(async () => {
-    if (!processedImage) {
-      setError('Please upload an image first. The preprocessed image is missing.');
-      return;
-    }
+        setStep('ANALYZING');
+        const analysis = await analyzeGeometry(preprocessedBase64, 'image/png');
+        
+        if (typeof analysis !== 'object' || analysis === null || !analysis.boundingBox || !analysis.geometryData) {
+            throw new Error("Invalid analysis result from AI. Expected a valid object.");
+        }
+        setAnalysisResult(analysis);
 
-    setCurrentStep('ANALYZING');
-    setError(null);
-    setAnalysisResult(null);
-    setCroppedImage(null);
-    setLatexCode(null);
+        const cropped = await cropImage(preprocessedBase64, analysis.boundingBox);
+        setCroppedImage(cropped);
 
-    try {
-      const analysis: AnalysisResult = await analyzeGeometry(processedImage, 'image/png');
-      setAnalysisResult(analysis);
-      
-      const cropped = await cropImage(processedImage, analysis.boundingBox);
-      setCroppedImage(cropped);
+        if (analysis.confidenceScore < 0.7) {
+            console.warn(`Low confidence score: ${analysis.confidenceScore}. Results may be inaccurate.`);
+        }
 
-      setCurrentStep('VERIFYING');
+        setStep('VERIFYING');
+        const latex = await generateLatex(analysis.geometryData);
 
-      const latexResult = await generateLatex(analysis.geometryData);
-      setLatexCode(latexResult.latexCode);
-      setCurrentStep('DONE');
-      
+        if (typeof latex !== 'object' || latex === null || typeof latex.latexCode !== 'string') {
+            throw new Error("Invalid LaTeX result from AI. Expected a valid object with latexCode.");
+        }
+        setLatexResult(latex);
+
+        setStep('DONE');
     } catch (err) {
-      console.error(err);
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-      setError(`Processing failed: ${errorMessage}`);
-      setCurrentStep('ERROR');
+        console.error("Processing failed:", err);
+        setIsPreprocessing(false);
+        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during processing.';
+        setError(errorMessage);
+        setStep('ERROR');
     }
-  }, [processedImage]);
+  }, []);
 
-  const renderResults = () => {
-    if (currentStep === 'IDLE' || currentStep === 'READY') return null;
-
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        {croppedImage && (
-          <ResultCard title="1. Isolated Geometry">
-            <div className="bg-white rounded-lg p-4 flex justify-center items-center">
-              <img 
-                src={`data:image/png;base64,${croppedImage}`} 
-                alt="Isolated Geometry" 
-                className="max-w-full h-auto"
-              />
-            </div>
-          </ResultCard>
-        )}
-        {analysisResult?.geometryData && (
-          <ResultCard title="2. Extracted Data & Line Types">
-            {typeof analysisResult.confidenceScore === 'number' && (
-              <ConfidenceIndicator score={analysisResult.confidenceScore} />
-            )}
-            <CodeBlock language="json" code={JSON.stringify(analysisResult.geometryData, null, 2)} />
-          </ResultCard>
-        )}
-        {latexCode && (
-           <ResultCard title="3. Generated LaTeX (TikZ)">
-             <CodeBlock language="latex" code={latexCode} />
-           </ResultCard>
-        )}
-      </div>
-    );
-  };
+  const isApiProcessing = step === 'ANALYZING' || step === 'VERIFYING';
+  const showResults = step === 'DONE' && analysisResult && latexResult && croppedImage;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-4 sm:p-6 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        <header className="flex items-center gap-4 mb-8">
-          <LogoIcon />
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white">Geometry to LaTeX Agent</h1>
-            <p className="text-slate-400">AI-powered analysis of geometric figures from images.</p>
+    <div className="bg-slate-950 text-slate-200 min-h-screen font-sans">
+      <main className="container mx-auto px-4 py-8 md:py-12">
+        <header className="text-center mb-8">
+          <div className="flex justify-center items-center gap-3">
+            <LogoIcon />
+            <h1 className="text-4xl font-bold text-white tracking-tight">GeoLaTeX</h1>
           </div>
+          <p className="mt-2 text-lg text-slate-400">
+            Upload a geometric diagram, and get its TikZ LaTeX code instantly.
+          </p>
         </header>
 
-        <main>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-1 bg-slate-800/50 p-6 rounded-2xl border border-slate-700 shadow-lg">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <UploadIcon />
-                Upload Image
-              </h2>
-              <ImageUploader 
-                onImageUpload={handleImageUpload} 
-                isProcessing={isPreprocessing}
-                disabled={isPreprocessing || currentStep === 'ANALYZING' || currentStep === 'VERIFYING'} 
-              />
-              
-              {image && (
-                <button
-                  onClick={processGeometry}
-                  disabled={isPreprocessing || currentStep === 'ANALYZING' || currentStep === 'VERIFYING'}
-                  className="mt-4 w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors duration-200"
-                >
-                  {isPreprocessing ? 'Preprocessing...' : (currentStep === 'ANALYZING' || currentStep === 'VERIFYING' ? 'Processing...' : 'Analyze Geometry')}
-                </button>
-              )}
-            </div>
+        <div className="max-w-xl mx-auto mb-8">
+          <ImageUploader 
+            onImageUpload={handleImageUpload} 
+            disabled={isApiProcessing || isPreprocessing}
+            isProcessing={isPreprocessing}
+          />
+        </div>
 
-            <div className="lg:col-span-2 bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
-              <h2 className="text-xl font-semibold text-white mb-4">Analysis Pipeline</h2>
-              <StepDisplay currentStep={currentStep} error={error} />
-              
-              {processedImage && currentStep === 'READY' && (
-                <div className="mt-6">
-                  <ResultCard title="0. Preprocessed Image for Analysis">
-                    <div className="bg-white rounded-lg p-4 flex justify-center items-center">
-                      <img 
-                        src={`data:image/png;base64,${processedImage}`} 
-                        alt="Preprocessed for analysis"
-                        className="max-w-full h-auto"
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2">This enhanced image (grayscale, blurred, edge-detected) is sent to the AI to improve accuracy.</p>
-                  </ResultCard>
-                </div>
-              )}
-
-              {(currentStep === 'IDLE' && !processedImage) && !error && (
-                <div className="text-center text-slate-400 py-16">
-                  <p className="text-lg">Upload an image and click "Analyze Geometry" to begin.</p>
-                  <p>The results of each processing step will appear here.</p>
-                </div>
-              )}
-              
-              {renderResults()}
-            </div>
+        {step !== 'IDLE' && step !== 'READY' && (
+          <div className="max-w-2xl mx-auto mb-8">
+            <StepDisplay currentStep={step} error={error} />
           </div>
-        </main>
-      </div>
+        )}
+
+        {showResults && (
+          <div className="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+            <ResultCard title="Isolated Geometry">
+              <div className="bg-black p-2 rounded-lg border border-slate-700 flex justify-center items-center">
+                 <img src={`data:image/png;base64,${croppedImage}`} alt="Isolated geometric figure" className="max-w-full h-auto rounded-sm" />
+              </div>
+            </ResultCard>
+             <ResultCard title="Analysis Confidence">
+               <ConfidenceIndicator score={analysisResult.confidenceScore} />
+            </ResultCard>
+            <ResultCard title="Geometry Analysis (JSON)">
+              <CodeBlock code={JSON.stringify(analysisResult.geometryData, null, 2)} language="json" />
+            </ResultCard>
+            <ResultCard title="Generated LaTeX (TikZ)">
+              <CodeBlock code={latexResult.latexCode} language="latex" />
+            </ResultCard>
+          </div>
+        )}
+
+      </main>
+      <footer className="text-center p-4 text-slate-500 text-sm">
+        <p>Powered by Gemini API</p>
+      </footer>
     </div>
   );
 }
+
+export default App;
