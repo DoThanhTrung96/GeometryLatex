@@ -98,7 +98,29 @@ function App() {
     } catch (err) {
         console.error("Processing failed:", err);
         setIsPreprocessing(false);
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during processing.';
+        
+        let errorMessage = 'An unknown error occurred during processing.';
+        if (err instanceof Error) {
+            // The message from some SDKs might be an object containing details.
+            // We stringify it to ensure it's readable in the UI.
+            if (typeof err.message === 'object' && err.message !== null) {
+                errorMessage = JSON.stringify(err.message, null, 2);
+            } else {
+                errorMessage = err.message;
+            }
+        } else if (typeof err === 'object' && err !== null) {
+            // Handle cases where a plain object is thrown (common for API errors).
+            if ('message' in err && typeof (err as any).message === 'string') {
+                errorMessage = (err as any).message;
+            } else {
+                // As a fallback, stringify the whole error object.
+                errorMessage = JSON.stringify(err, null, 2);
+            }
+        } else if (err) {
+            // Handle strings or other primitive types being thrown.
+            errorMessage = String(err);
+        }
+    
         setError(errorMessage);
         setStep('ERROR');
     }

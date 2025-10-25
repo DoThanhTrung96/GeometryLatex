@@ -1,70 +1,119 @@
-// FIX: This file was created to implement the Gemini API services, resolving import errors and providing core AI functionality.
-import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
+import { GoogleGenAI, GenerateContentResponse, Type } from '@google/genai';
 import type { AnalysisResult, GeometryData, LatexResult } from '../types';
 
 // Initialize the Google GenAI client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
+ * Defines the schema for the structured JSON response from the geometry analysis.
+ */
+const analysisSchema = {
+    type: Type.OBJECT,
+    properties: {
+        boundingBox: {
+            type: Type.OBJECT,
+            properties: {
+                x: { type: Type.NUMBER, description: "The x-coordinate of the top-left corner." },
+                y: { type: Type.NUMBER, description: "The y-coordinate of the top-left corner." },
+                width: { type: Type.NUMBER, description: "The width of the bounding box." },
+                height: { type: Type.NUMBER, description: "The height of the bounding box." },
+            },
+            required: ['x', 'y', 'width', 'height'],
+        },
+        geometryData: {
+            type: Type.OBJECT,
+            description: "A detailed JSON object describing all geometric features.",
+            properties: {
+                vertices: {
+                    type: Type.ARRAY,
+                    description: "List of all vertices with their labels and coordinates.",
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            label: { type: Type.STRING },
+                            x: { type: Type.NUMBER },
+                            y: { type: Type.NUMBER }
+                        },
+                        required: ['label', 'x', 'y']
+                    }
+                },
+                lines: {
+                    type: Type.ARRAY,
+                    description: "List of all lines connecting vertices, including their style.",
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            from: { type: Type.STRING, description: "Label of the starting vertex." },
+                            to: { type: Type.STRING, description: "Label of the ending vertex." },
+                            style: { type: Type.STRING, description: "'solid' or 'dashed'." }
+                        },
+                        required: ['from', 'to', 'style']
+                    }
+                },
+                annotations: {
+                    type: Type.ARRAY,
+                    description: "List of any annotations like angles or side labels. Can be empty.",
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            label: { type: Type.STRING, description: "The text of the annotation (e.g., 'a', '45°')." },
+                            type: { type: Type.STRING, description: "'angle' or 'side-label'." },
+                            position: { type: Type.STRING, description: "A semantic description of where the annotation is located (e.g., 'midpoint of BC', 'angle at vertex A')."}
+                        },
+                        required: ['label', 'type', 'position']
+                    }
+                }
+            },
+            required: ['vertices', 'lines', 'annotations']
+        },
+        confidenceScore: {
+            type: Type.NUMBER,
+            description: "A float between 0.0 and 1.0 indicating the model's confidence in the analysis."
+        },
+    },
+    required: ['boundingBox', 'geometryData', 'confidenceScore'],
+};
+
+/**
  * Analyzes a preprocessed image of a geometric diagram using the Gemini API.
  * @param imageBase64 The base64-encoded string of the preprocessed image.
  * @param mimeType The MIME type of the image.
- * @returns A promise that resolves to an AnalysisResult object containing the bounding box, geometry data, and confidence score.
+ * @returns A promise that resolves to an AnalysisResult object.
  */
 export const analyzeGeometry = async (imageBase64: string, mimeType: string): Promise<AnalysisResult> => {
-    // Use a powerful model for complex visual analysis and structured data extraction.
     const model = 'gemini-2.5-pro';
 
     const imagePart = {
-        inlineData: {
-            data: imageBase64,
-            mimeType: mimeType,
-        },
+        inlineData: { data: imageBase64, mimeType: mimeType },
     };
 
     const textPart = {
-        text: `Analyze the provided image of a geometric diagram. The image is preprocessed (binarized and inverted) with the geometry in white on a black background.
+        text: `Analyze the provided image of a geometric diagram, which has been preprocessed to show white geometry on a black background.
       Your task is to:
-      1.  Identify the main geometric figure.
-      2.  Determine a tight bounding box coordinates (x, y, width, height) that precisely encloses the geometric figure, ignoring any whitespace or artifacts.
-      3.  Extract all geometric features (points, lines, shapes, angles, labels) and their relationships into a structured JSON object. Name this object 'geometryData'.
-      4.  Provide a confidence score (a float between 0.0 and 1.0) for the accuracy of your analysis.
-      
-      Respond with ONLY a single, valid JSON object in the following format, with no surrounding text or markdown backticks:
-      {
-        "boundingBox": { "x": number, "y": number, "width": number, "height": number },
-        "geometryData": { ... },
-        "confidenceScore": number
-      }`
+      1. Identify the main geometric figure.
+      2. Determine a tight bounding box that precisely encloses the figure.
+      3. Extract all geometric features into a structured 'geometryData' JSON object. This object must contain 'vertices' (an array of points with labels and coordinates), 'lines' (an array connecting vertices with a style like 'solid' or 'dashed'), and 'annotations' (an array for any other labels like angles or side lengths).
+      4. Provide a confidence score for the accuracy of your analysis.
+      Respond with a JSON object conforming to the provided schema.`
     };
 
     const response: GenerateContentResponse = await ai.models.generateContent({
         model,
         contents: { parts: [imagePart, textPart] },
-        // Request JSON output to ensure a parsable response.
         config: {
             responseMimeType: "application/json",
+            responseSchema: analysisSchema, // Use the enforced schema for reliability
         },
     });
     
-    // Extract the text content from the response and parse it as JSON.
     const jsonString = response.text.trim();
     try {
         const result = JSON.parse(jsonString);
-        // Validate the structure of the parsed JSON to ensure it matches expectations.
-        if (
-            result &&
-            typeof result.boundingBox === 'object' &&
-            typeof result.boundingBox.x === 'number' &&
-            typeof result.boundingBox.y === 'number' &&
-            typeof result.boundingBox.width === 'number' &&
-            typeof result.boundingBox.height === 'number' &&
-            typeof result.geometryData === 'object' &&
-            typeof result.confidenceScore === 'number'
-        ) {
+        // The schema should enforce this, but a check adds robustness.
+        if (result && result.boundingBox && result.geometryData && typeof result.confidenceScore === 'number') {
             return result as AnalysisResult;
         } else {
-            throw new Error('Invalid JSON structure in AI response.');
+            throw new Error('AI response did not conform to the expected schema.');
         }
     } catch (e) {
         console.error("Failed to parse AI response JSON:", e);
@@ -74,19 +123,36 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
 };
 
 /**
+ * Defines the schema for the structured JSON response for LaTeX generation.
+ */
+const latexSchema = {
+    type: Type.OBJECT,
+    properties: {
+        latexCode: {
+            type: Type.STRING,
+            description: "A complete, standalone, and compilable LaTeX document as a single string."
+        }
+    },
+    required: ['latexCode']
+};
+
+/**
  * Generates TikZ LaTeX code from a structured geometric data object using the Gemini API.
  * @param geometryData The structured JSON object describing the geometry.
- * @returns A promise that resolves to a LatexResult object containing the generated LaTeX code.
+ * @returns A promise that resolves to a LatexResult object.
  */
 export const generateLatex = async (geometryData: GeometryData): Promise<LatexResult> => {
-    // Use a model strong in coding and technical languages.
     const model = 'gemini-2.5-pro';
 
-    const prompt = `Based on the following JSON object describing geometric data, generate the corresponding LaTeX code using the TikZ package.
+    const prompt = `Based on the following JSON object describing geometric data, generate a complete and compilable LaTeX document using the TikZ package.
     
-    The code should be a complete, self-contained TikZ picture environment.
-    Do not include the document class, package imports, or begin/end document commands. Only provide the code from \\begin{tikzpicture} to \\end{tikzpicture}.
-    Ensure the generated TikZ code accurately represents the geometric relationships described in the JSON.
+    The output MUST be a full LaTeX document as a single string in the 'latexCode' field, including:
+    1. The \\documentclass{standalone} command.
+    2. The \\usepackage{tikz} and \\usepackage{tkz-euclide} commands for drawing and annotations.
+    3. The \\begin{document} and \\end{document} environment.
+    4. The TikZ picture environment (\\begin{tikzpicture} ... \\end{tikzpicture}) containing the drawing.
+    
+    Ensure the generated TikZ code is well-formatted with newlines for readability. It must accurately represent all geometric relationships described in the JSON and be ready for compilation without errors.
 
     JSON Data:
     ${JSON.stringify(geometryData, null, 2)}
@@ -95,10 +161,23 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
     const response: GenerateContentResponse = await ai.models.generateContent({
         model,
         contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: latexSchema, // Enforce a structured JSON response
+        }
     });
 
-    // Extract the generated LaTeX code from the model's response.
-    const latexCode = response.text.trim();
-
-    return { latexCode };
+    const jsonString = response.text.trim();
+    try {
+        const result = JSON.parse(jsonString);
+        if (result && typeof result.latexCode === 'string') {
+            return result as LatexResult;
+        } else {
+            throw new Error('Invalid JSON structure for LaTeX response.');
+        }
+    } catch (e) {
+        console.error("Failed to parse LaTeX AI response JSON:", e);
+        console.error("Raw LaTeX response text:", jsonString);
+        throw new Error('Could not parse the JSON response for LaTeX from the AI.');
+    }
 };
