@@ -6,7 +6,7 @@ import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon } from './components/icons';
 import { preprocessImage, cropImage } from './services/imageProcessing';
 import { analyzeGeometry, generateLatex } from './services/geminiService';
-import type { ProcessingStep, AnalysisResult, LatexResult } from './types';
+import type { ProcessingStep, AnalysisSuccessResult, LatexResult } from './types';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
@@ -39,7 +39,7 @@ function App() {
   const [step, setStep] = useState<ProcessingStep>('IDLE');
   const [error, setError] = useState<string | null>(null);
   const [isPreprocessing, setIsPreprocessing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisSuccessResult | null>(null);
   const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
 
@@ -59,10 +59,10 @@ function App() {
                 if (typeof reader.result === 'string') {
                     resolve(reader.result.split(',')[1]);
                 } else {
-                    reject(new Error('Failed to read file as data URL.'));
+                    reject(new Error('Failed to read file as a data URL.'));
                 }
             };
-            reader.onerror = (error) => reject(error);
+            reader.onerror = () => reject(new Error('Failed to read file.'));
         });
     };
 
@@ -74,9 +74,11 @@ function App() {
         setStep('ANALYZING');
         const analysis = await analyzeGeometry(preprocessedBase64, 'image/png');
         
-        if (typeof analysis !== 'object' || analysis === null || !analysis.boundingBox || !analysis.geometryData) {
-            throw new Error("Invalid analysis result from AI. Expected a valid object.");
+        if (!analysis.geometryFound) {
+            throw new Error("No geometric figure could be identified in the image. Please try a clearer image.");
         }
+        
+        // From here, `analysis` is guaranteed to be AnalysisSuccessResult
         setAnalysisResult(analysis);
 
         const cropped = await cropImage(preprocessedBase64, analysis.boundingBox);
@@ -101,23 +103,12 @@ function App() {
         
         let errorMessage = 'An unknown error occurred during processing.';
         if (err instanceof Error) {
-            // The message from some SDKs might be an object containing details.
-            // We stringify it to ensure it's readable in the UI.
-            if (typeof err.message === 'object' && err.message !== null) {
-                errorMessage = JSON.stringify(err.message, null, 2);
-            } else {
-                errorMessage = err.message;
-            }
+            errorMessage = err.message;
         } else if (typeof err === 'object' && err !== null) {
-            // Handle cases where a plain object is thrown (common for API errors).
-            if ('message' in err && typeof (err as any).message === 'string') {
-                errorMessage = (err as any).message;
-            } else {
-                // As a fallback, stringify the whole error object.
-                errorMessage = JSON.stringify(err, null, 2);
-            }
+            errorMessage = ('message' in err && typeof (err as any).message === 'string')
+                ? (err as any).message
+                : JSON.stringify(err, null, 2);
         } else if (err) {
-            // Handle strings or other primitive types being thrown.
             errorMessage = String(err);
         }
     

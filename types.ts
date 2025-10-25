@@ -1,13 +1,5 @@
-// FIX: This file was created to define shared types for the application, resolving import errors in other components.
-
-/**
- * Represents the different states of the image processing pipeline.
- */
 export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'VERIFYING' | 'DONE' | 'ERROR';
 
-/**
- * Defines the structure for a bounding box with coordinates and dimensions.
- */
 export interface BoundingBox {
   x: number;
   y: number;
@@ -15,25 +7,53 @@ export interface BoundingBox {
   height: number;
 }
 
-/**
- * A flexible type for the structured geometric data extracted by the AI.
- */
+export interface Vertex {
+  label: string;
+  x: number;
+  y: number;
+}
+
+export interface Line {
+  from: string;
+  to: string;
+  style: 'solid' | 'dashed';
+}
+
+export interface Annotation {
+  label: string;
+  type: 'angle' | 'side-label';
+  position: string;
+}
+
 export interface GeometryData {
-  [key: string]: any;
+  vertices: Vertex[];
+  lines: Line[];
+  annotations: Annotation[];
 }
 
 /**
- * The structured result from the geometry analysis API call.
+ * Represents a successful analysis where geometry was found.
  */
-export interface AnalysisResult {
+export interface AnalysisSuccessResult {
+  geometryFound: true;
   boundingBox: BoundingBox;
   geometryData: GeometryData;
   confidenceScore: number;
 }
 
 /**
- * The structured result from the LaTeX generation API call.
+ * Represents a failed analysis where no geometry could be identified.
  */
+export interface AnalysisFailureResult {
+  geometryFound: false;
+}
+
+/**
+ * A union type representing the possible outcomes of the geometry analysis.
+ */
+export type AnalysisResult = AnalysisSuccessResult | AnalysisFailureResult;
+
+
 export interface LatexResult {
   latexCode: string;
 }

@@ -6,10 +6,15 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
  * Defines the schema for the structured JSON response from the geometry analysis.
+ * It now includes a mandatory 'geometryFound' flag to handle cases with no geometry.
  */
 const analysisSchema = {
     type: Type.OBJECT,
     properties: {
+        geometryFound: {
+            type: Type.BOOLEAN,
+            description: "Set to true if a geometric figure was found, otherwise false."
+        },
         boundingBox: {
             type: Type.OBJECT,
             properties: {
@@ -71,14 +76,14 @@ const analysisSchema = {
             description: "A float between 0.0 and 1.0 indicating the model's confidence in the analysis."
         },
     },
-    required: ['boundingBox', 'geometryData', 'confidenceScore'],
+    required: ['geometryFound'], // Only geometryFound is always required.
 };
 
 /**
  * Analyzes a preprocessed image of a geometric diagram using the Gemini API.
  * @param imageBase64 The base64-encoded string of the preprocessed image.
  * @param mimeType The MIME type of the image.
- * @returns A promise that resolves to an AnalysisResult object.
+ * @returns A promise that resolves to an AnalysisResult object, which indicates success or failure.
  */
 export const analyzeGeometry = async (imageBase64: string, mimeType: string): Promise<AnalysisResult> => {
     const model = 'gemini-2.5-pro';
@@ -90,10 +95,9 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
     const textPart = {
         text: `Analyze the provided image of a geometric diagram, which has been preprocessed to show white geometry on a black background.
       Your task is to:
-      1. Identify the main geometric figure.
-      2. Determine a tight bounding box that precisely encloses the figure.
-      3. Extract all geometric features into a structured 'geometryData' JSON object. This object must contain 'vertices' (an array of points with labels and coordinates), 'lines' (an array connecting vertices with a style like 'solid' or 'dashed'), and 'annotations' (an array for any other labels like angles or side lengths).
-      4. Provide a confidence score for the accuracy of your analysis.
+      1. Analyze the image to find a main geometric figure. A solid-color image (e.g., all white or all black) does not count as a discernible figure.
+      2. If a figure is found, set 'geometryFound' to true and provide a tight 'boundingBox', the extracted 'geometryData', and a 'confidenceScore'.
+      3. If no discernible geometric figure is present (e.g., the image is blank, solid-colored, or contains only text), you MUST set 'geometryFound' to false and omit the 'boundingBox', 'geometryData', and 'confidenceScore' fields.
       Respond with a JSON object conforming to the provided schema.`
     };
 
@@ -102,19 +106,15 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
         contents: { parts: [imagePart, textPart] },
         config: {
             responseMimeType: "application/json",
-            responseSchema: analysisSchema, // Use the enforced schema for reliability
+            responseSchema: analysisSchema,
+            thinkingConfig: { thinkingBudget: 32768 },
         },
     });
     
     const jsonString = response.text.trim();
     try {
         const result = JSON.parse(jsonString);
-        // The schema should enforce this, but a check adds robustness.
-        if (result && result.boundingBox && result.geometryData && typeof result.confidenceScore === 'number') {
-            return result as AnalysisResult;
-        } else {
-            throw new Error('AI response did not conform to the expected schema.');
-        }
+        return result as AnalysisResult;
     } catch (e) {
         console.error("Failed to parse AI response JSON:", e);
         console.error("Raw response text:", jsonString);
@@ -142,13 +142,13 @@ const latexSchema = {
  * @returns A promise that resolves to a LatexResult object.
  */
 export const generateLatex = async (geometryData: GeometryData): Promise<LatexResult> => {
-    const model = 'gemini-2.5-pro';
+    const model = 'gemini-2.5-flash';
 
     const prompt = `Based on the following JSON object describing geometric data, generate a complete and compilable LaTeX document using the TikZ package.
     
     The output MUST be a full LaTeX document as a single string in the 'latexCode' field, including:
     1. The \\documentclass{standalone} command.
-    2. The \\usepackage{tikz} and \\usepackage{tkz-euclide} commands for drawing and annotations.
+    2. The \\usepackage{tikz} command for drawing.
     3. The \\begin{document} and \\end{document} environment.
     4. The TikZ picture environment (\\begin{tikzpicture} ... \\end{tikzpicture}) containing the drawing.
     

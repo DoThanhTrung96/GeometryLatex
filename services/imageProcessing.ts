@@ -1,12 +1,11 @@
 import type { BoundingBox } from '../types';
 
-const loadImage = (base64: string): Promise<HTMLImageElement> => {
+const loadImage = (src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = reject;
-        // The source can be any format, but the preprocessed result will be PNG.
-        img.src = `data:image/unknown;base64,${base64}`;
+        img.onerror = () => reject(new Error('Failed to load image from data.')); // Pass a proper Error object
+        img.src = src;
     });
 };
 
@@ -23,7 +22,7 @@ const toGrayscale = (ctx: CanvasRenderingContext2D, width: number, height: numbe
 };
 
 /**
- * Binarizes the image based on a threshold and inverts the colors.
+ * Binarizes the image based on a threshold, inverts the colors, and ensures it is opaque.
  * Assumes a grayscale image is on the canvas.
  * This turns dark lines on a light background into bright white lines on a black background.
  * @param ctx The canvas rendering context.
@@ -46,7 +45,7 @@ const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height:
         data[i] = finalValue;     // red
         data[i + 1] = finalValue; // green
         data[i + 2] = finalValue; // blue
-        // Alpha remains 255.
+        data[i + 3] = 255;        // Force alpha to be fully opaque.
     }
     ctx.putImageData(imageData, 0, 0);
 };
@@ -55,13 +54,13 @@ const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height:
 /**
  * Applies a robust series of filters to an image to prepare it for geometry analysis.
  * The new pipeline is: Grayscale -> Binarize & Invert.
- * This creates a high-contrast, clean image with solid white features on a solid black background,
+ * This creates a high-contrast, clean, opaque image with solid white features on a solid black background,
  * which is much more reliable for AI analysis than edge detection.
  * @param imageBase64 The base64 encoded source image.
  * @returns A promise that resolves with the base64 encoded, preprocessed PNG image.
  */
 export const preprocessImage = async (imageBase64: string): Promise<string> => {
-    const img = await loadImage(imageBase64);
+    const img = await loadImage(`data:image/unknown;base64,${imageBase64}`);
     const canvas = document.createElement('canvas');
     canvas.width = img.width;
     canvas.height = img.height;
