@@ -1,0 +1,63 @@
+
+import React from 'react';
+import type { ProcessingStep } from '../types';
+import { AnalyzeIcon, CheckIcon, ErrorIcon, VerifyIcon, IdleIcon } from './icons';
+
+interface StepDisplayProps {
+  currentStep: ProcessingStep;
+  error?: string | null;
+}
+
+const steps = [
+  { id: 'ANALYZING', name: 'Analyzing Geometry', icon: <AnalyzeIcon /> },
+  { id: 'VERIFYING', name: 'Verifying & Generating LaTeX', icon: <VerifyIcon /> },
+  { id: 'DONE', name: 'Completed', icon: <CheckIcon /> },
+];
+
+export const StepDisplay: React.FC<StepDisplayProps> = ({ currentStep, error }) => {
+  const currentStepIndex = steps.findIndex(step => {
+    if (currentStep === 'DONE') return step.id === 'DONE';
+    return currentStep === step.id;
+  });
+
+  if (currentStep === 'ERROR') {
+    return (
+      <div className="bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg flex items-start gap-3">
+        <ErrorIcon className="w-6 h-6 flex-shrink-0 mt-1" />
+        <div>
+          <h3 className="font-bold">An Error Occurred</h3>
+          <p className="text-sm">{error || 'Something went wrong.'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+      {steps.map((step, index) => {
+        const isActive = currentStepIndex === index;
+        const isCompleted = currentStepIndex > index || currentStep === 'DONE';
+        
+        return (
+          <React.Fragment key={step.id}>
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition-colors duration-300 ${
+                  isActive ? 'bg-indigo-600 animate-pulse' : isCompleted ? 'bg-green-600' : 'bg-slate-600'
+                }`}
+              >
+                {step.icon}
+              </div>
+              <span className={`${isCompleted || isActive ? 'text-white' : 'text-slate-400'}`}>
+                {step.name}
+              </span>
+            </div>
+            {index < steps.length - 1 && (
+              <div className="hidden sm:block h-0.5 w-16 bg-slate-600" />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};

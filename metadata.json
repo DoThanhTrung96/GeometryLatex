@@ -1,0 +1,5 @@
+{
+  "name": "Geometry to LaTeX Converter",
+  "description": "An intelligent agent that analyzes geometric figures from images, extracts their properties, and generates corresponding LaTeX code using the TikZ library for precise redrawing.",
+  "requestFramePermissions": []
+}
