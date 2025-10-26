@@ -97,13 +97,21 @@ const autoCropFrame = (ctx: CanvasRenderingContext2D, width: number, height: num
             break;
         }
     }
+    
+    // Add a safety margin to prevent clipping geometry that touches the edge.
+    const PADDING = 10; 
 
-    const croppedWidth = Math.max(1, right - left);
-    const croppedHeight = Math.max(1, bottom - top);
+    const paddedLeft = Math.max(0, left - PADDING);
+    const paddedTop = Math.max(0, top - PADDING);
+    const paddedRight = Math.min(width, right + PADDING);
+    const paddedBottom = Math.min(height, bottom + PADDING);
+
+    const croppedWidth = Math.max(1, paddedRight - paddedLeft);
+    const croppedHeight = Math.max(1, paddedBottom - paddedTop);
 
     return {
-        x: left,
-        y: top,
+        x: paddedLeft,
+        y: paddedTop,
         width: croppedWidth,
         height: croppedHeight,
     };

@@ -5,9 +5,10 @@ import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
 import { preprocessImage, cropImage, getValidatedBoundingBox } from './services/imageProcessing';
-import { analyzeGeometry, generateLatex } from './services/geminiService';
+import { analyzeGeometry, generateLatex, fixLatex } from './services/geminiService';
+import { verifyLatex } from './services/latexCompilerService';
 import { getFriendlyErrorMessage } from './services/errorService';
-import type { ProcessingStep, AnalysisSuccessResult, LatexResult } from './types';
+import type { ProcessingStep, AnalysisSuccessResult, LatexResult, VerificationResult } from './types';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
@@ -101,10 +102,42 @@ function App() {
             console.warn(`Low confidence score: ${analysis.confidenceScore}. Results may be inaccurate.`);
         }
 
+        // --- Start of Verification and Correction Loop ---
+        let currentLatexCode = '';
+        let verificationResult: VerificationResult | null = null;
+        const MAX_CORRECTION_ATTEMPTS = 2;
+
         setStep('GENERATING');
-        const currentLatexResult = await generateLatex(analysis.geometryData);
-        setLatexResult(currentLatexResult);
+        const initialResult = await generateLatex(analysis.geometryData);
+        currentLatexCode = initialResult.latexCode;
+
+        for (let attempt = 0; attempt <= MAX_CORRECTION_ATTEMPTS; attempt++) {
+            setStep('VERIFYING');
+            try {
+                verificationResult = await verifyLatex(currentLatexCode);
+                if (verificationResult.success) {
+                    break; // Exit loop if compilation is successful
+                }
+            } catch (verifyError) {
+                console.error("Verification service failed:", verifyError);
+                verificationResult = { success: false, log: `The LaTeX verification service could not be reached. Error: ${getFriendlyErrorMessage(verifyError)}` };
+            }
+
+            if (attempt === MAX_CORRECTION_ATTEMPTS) {
+                const finalLog = verificationResult?.log ? `\n\n--- Final Compilation Log ---\n${verificationResult.log}` : '';
+                throw new Error(`The AI failed to produce compilable LaTeX code after ${MAX_CORRECTION_ATTEMPTS} attempts.${finalLog}`);
+            }
+
+            setStep('CORRECTING');
+            const correctedResult = await fixLatex(currentLatexCode, verificationResult.log || "Unknown compilation error.");
+            currentLatexCode = correctedResult.latexCode;
+        }
         
+        if (!verificationResult?.success) {
+             throw new Error("Failed to produce compilable LaTeX code after multiple correction attempts.");
+        }
+        
+        setLatexResult({ latexCode: currentLatexCode });
         setStep('DONE');
     } catch (err) {
         setIsPreprocessing(false);
@@ -114,7 +147,7 @@ function App() {
     }
   }, [originalFile]);
 
-  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING';
+  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING' || step === 'CORRECTING';
   const isProcessing = isApiProcessing || isPreprocessing;
   const showResults = step === 'DONE' && analysisResult && latexResult && croppedImage;
 
@@ -140,9 +173,9 @@ function App() {
         </div>
 
         {originalFile && (
-           <div className="max-w-2xl mx-auto my-8 flex flex-col items-center gap-4">
+           <div className="max-w-4xl mx-auto my-8 flex flex-col items-center gap-4">
              {step !== 'IDLE' && step !== 'READY' && (
-               <div className="w-full">
+               <div className="w-full flex justify-center">
                  <StepDisplay currentStep={step} error={error} />
                </div>
              )}

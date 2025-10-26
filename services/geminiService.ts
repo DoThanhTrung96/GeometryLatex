@@ -1,206 +1,218 @@
-import { GoogleGenAI, GenerateContentResponse, Type } from '@google/genai';
+
+import { GoogleGenAI, Type } from "@google/genai";
 import type { AnalysisResult, GeometryData, LatexResult } from '../types';
 
-// Initialize the Google GenAI client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// According to guidelines, API key must be from process.env.API_KEY
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
-/**
- * Defines the schema for the structured JSON response from the geometry analysis.
- * It now includes a mandatory 'geometryFound' flag to handle cases with no geometry.
- */
-const analysisSchema = {
+const geometryDataSchema = {
+    type: Type.OBJECT,
+    properties: {
+        vertices: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    label: { type: Type.STRING },
+                    x: { type: Type.NUMBER },
+                    y: { type: Type.NUMBER },
+                },
+                required: ['label', 'x', 'y'],
+            }
+        },
+        lines: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    from: { type: Type.STRING },
+                    to: { type: Type.STRING },
+                    style: { type: Type.STRING, enum: ['solid', 'dashed'] },
+                },
+                required: ['from', 'to', 'style'],
+            }
+        },
+        annotations: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    label: { type: Type.STRING },
+                    type: { type: Type.STRING, enum: ['angle', 'side-label', 'relationship'] },
+                    position: { type: Type.STRING, description: "A descriptive position, e.g., 'inside triangle near vertex B'" },
+                },
+                required: ['label', 'type', 'position'],
+            }
+        }
+    },
+    required: ['vertices', 'lines', 'annotations']
+};
+
+const analysisResultSchema = {
     type: Type.OBJECT,
     properties: {
         geometryFound: {
             type: Type.BOOLEAN,
-            description: "Set to true if a geometric figure was found, otherwise false."
+            description: "Set to true if a geometric figure is clearly identifiable, otherwise false."
         },
         boundingBox: {
             type: Type.OBJECT,
+            description: "The bounding box of the identified geometric figure. Only include if geometryFound is true.",
             properties: {
-                x: { type: Type.NUMBER, description: "The x-coordinate of the top-left corner." },
-                y: { type: Type.NUMBER, description: "The y-coordinate of the top-left corner." },
-                width: { type: Type.NUMBER, description: "The width of the bounding box." },
-                height: { type: Type.NUMBER, description: "The height of the bounding box." },
+                x: { type: Type.INTEGER },
+                y: { type: Type.INTEGER },
+                width: { type: Type.INTEGER },
+                height: { type: Type.INTEGER },
             },
-            required: ['x', 'y', 'width', 'height'],
+            required: ['x', 'y', 'width', 'height']
         },
         geometryData: {
-            type: Type.OBJECT,
-            description: "A detailed JSON object describing all geometric features.",
-            properties: {
-                vertices: {
-                    type: Type.ARRAY,
-                    description: "List of all vertices with their labels and coordinates.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            label: { type: Type.STRING },
-                            x: { type: Type.NUMBER },
-                            y: { type: Type.NUMBER }
-                        },
-                        required: ['label', 'x', 'y']
-                    }
-                },
-                lines: {
-                    type: Type.ARRAY,
-                    description: "List of all lines connecting vertices, including their style.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            from: { type: Type.STRING, description: "Label of the starting vertex." },
-                            to: { type: Type.STRING, description: "Label of the ending vertex." },
-                            style: { type: Type.STRING, description: "'solid' or 'dashed'." }
-                        },
-                        required: ['from', 'to', 'style']
-                    }
-                },
-                annotations: {
-                    type: Type.ARRAY,
-                    description: "List of all annotations. This includes marked angles, side labels, and crucially, inferred geometric relationships like midpoints, parallelism, and perpendicularity.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            label: { type: Type.STRING, description: "For 'angle' or 'side-label', this is the text on the diagram (e.g., 'a', '45°'). For 'relationship', this is a full sentence describing the property (e.g., 'H is the midpoint of SE', 'Line AB is parallel to line CD', 'Line XY is perpendicular to line YZ')." },
-                            type: { type: Type.STRING, description: "The category of the annotation. Must be one of: 'angle', 'side-label', or 'relationship'." },
-                            position: { type: Type.STRING, description: "A semantic description of the annotation's location. For a relationship, this specifies the element(s) it applies to (e.g., 'segment SE', 'lines AB, CD', 'vertex C')." }
-                        },
-                        required: ['label', 'type', 'position']
-                    }
-                }
-            },
-            required: ['vertices', 'lines', 'annotations']
+            ...geometryDataSchema,
+            description: "Detailed analysis of the geometry. Only include if geometryFound is true."
         },
         confidenceScore: {
             type: Type.NUMBER,
-            description: "A float between 0.0 and 1.0 indicating the model's confidence in the analysis."
-        },
+            description: "A score from 0.0 to 1.0 indicating confidence in the analysis. Only include if geometryFound is true."
+        }
     },
-    required: ['geometryFound'], // Only geometryFound is always required.
+    required: ['geometryFound']
 };
 
-/**
- * Analyzes a preprocessed image of a geometric diagram using the Gemini API.
- * @param imageBase64 The base64-encoded string of the preprocessed image.
- * @param mimeType The MIME type of the image.
- * @returns A promise that resolves to an AnalysisResult object, which indicates success or failure.
- */
+
 export const analyzeGeometry = async (imageBase64: string, mimeType: string): Promise<AnalysisResult> => {
+    // Per guidelines for complex reasoning/STEM, use 'gemini-2.5-pro'.
     const model = 'gemini-2.5-pro';
 
     const imagePart = {
-        inlineData: { data: imageBase64, mimeType: mimeType },
+        inlineData: {
+            data: imageBase64,
+            mimeType: mimeType,
+        },
     };
 
     const textPart = {
-        text: `Your task is to act as an expert geometrician. Analyze the provided image of a geometric diagram, which has been preprocessed to show white geometry on a black background. Your analysis must be deep, accurate, and structured according to the JSON schema provided.
+        text: `
+Analyze the provided image to identify the main geometric figure. Your task is to extract its structural components and metadata.
 
-      **Primary Goal: Deep Relational Understanding**
-      The most critical part of your analysis is to identify not just the components of the figure, but the **geometric relationships** between them. Simple identification of points and lines is insufficient. You must infer relationships from visual cues.
+Instructions:
+1.  Determine if a clear geometric figure (e.g., triangle, circle with annotations, intersecting lines) is present.
+2.  If a figure is found:
+    a.  Define a tight bounding box around the entire geometric figure, including all labels and annotations.
+    b.  Identify all vertices, assigning a capital letter label and normalized (0-100) x/y coordinates relative to the bounding box.
+    c.  Identify all lines connecting the vertices, noting their style (solid or dashed).
+    d.  Identify all annotations, such as angle markers, side length labels, or relationship indicators (e.g., perpendicularity marks).
+    e.  Provide a confidence score (0.0 to 1.0) for your analysis. A high score (>0.9) means you are very certain. A low score (<0.7) suggests ambiguity.
+3.  If no clear geometric figure can be identified, simply indicate that geometry was not found.
 
-      **Analysis Workflow:**
-      1.  **Figure Identification:** First, confirm a geometric figure is present. If not, set 'geometryFound' to false and stop.
-      2.  **Structural Extraction:** If a figure exists:
-          *   Define a tight 'boundingBox' around it.
-          *   Extract all 'vertices' with labels and coordinates.
-          *   Extract all 'lines' connecting vertices, noting their style ('solid' or 'dashed').
-      3.  **Deep Relationship Analysis (MANDATORY):** This is the core of your task. You MUST meticulously examine the diagram for the following relationships and report them in the 'annotations' array with the type 'relationship'.
-          *   **Midpoints:** Actively search for points that bisect line segments. For example, if a point 'H' appears to be exactly in the middle of a segment 'SE', you MUST report it. Your output should be an annotation like: { "label": "H is the midpoint of SE", "type": "relationship", "position": "segment SE" }.
-          *   **Parallelism:** Identify any visual cues (like arrows on lines) that indicate two or more lines are parallel. Report this relationship clearly. For example: { "label": "Line AB is parallel to line CD", "type": "relationship", "position": "lines AB, CD" }.
-          *   **Perpendicularity:** Identify right angle symbols or other clear indicators that lines are perpendicular. Report this relationship. For example: { "label": "Line BC is perpendicular to line CD", "type": "relationship", "position": "lines BC, CD" }.
-          *   **Angles & Congruence:** Identify all marked angles (e.g., '45°', right angle symbols) and look for tick marks or labels indicating equal lengths of sides or equal angles.
-      4.  **Confidence Score:** Provide a 'confidenceScore' reflecting your certainty in the entire analysis, especially the inferred relationships.
-
-      **Output Format:**
-      You MUST respond with a single JSON object that strictly conforms to the provided schema. The success of this task is measured by the depth and accuracy of your relationship analysis.`
+Return your analysis in the specified JSON format.
+`
     };
 
-    const response: GenerateContentResponse = await ai.models.generateContent({
-        model,
-        contents: { parts: [imagePart, textPart] },
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: analysisSchema,
-            thinkingConfig: { thinkingBudget: 32768 },
-        },
-    });
-    
-    const jsonString = response.text.trim();
     try {
-        const result = JSON.parse(jsonString);
-        return result as AnalysisResult;
-    } catch (e) {
-        console.error("Failed to parse AI response JSON:", e);
-        console.error("Raw response text:", jsonString);
-        throw new Error('Could not parse the JSON response from the AI.');
+        const response = await ai.models.generateContent({
+            model,
+            contents: [{ parts: [imagePart, textPart] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: analysisResultSchema,
+            },
+        });
+
+        // According to guidelines, use response.text
+        const jsonText = response.text;
+        const result = JSON.parse(jsonText) as AnalysisResult;
+        return result;
+
+    } catch (error) {
+        console.error("Error analyzing geometry with Gemini:", error);
+        throw new Error("The AI service failed to analyze the image's geometry.");
     }
 };
 
-/**
- * Defines the schema for the structured JSON response for LaTeX generation.
- */
-const latexSchema = {
-    type: Type.OBJECT,
-    properties: {
-        latexCode: {
-            type: Type.STRING,
-            description: "A complete, standalone, and compilable LaTeX document as a single string."
-        }
-    },
-    required: ['latexCode']
+export const generateLatex = async (geometryData: GeometryData): Promise<LatexResult> => {
+    // Per guidelines for complex coding, use 'gemini-2.5-pro'.
+    const model = 'gemini-2.5-pro';
+    const prompt = `
+Based on the following JSON data describing a geometric figure, generate a COMPLETE and COMPILABLE LaTeX document using the TikZ package.
+
+JSON Data:
+\`\`\`json
+${JSON.stringify(geometryData, null, 2)}
+\`\`\`
+
+**CRITICAL REQUIREMENTS (Failure to follow will result in compilation errors):**
+
+1.  **COMPLETE DOCUMENT:** The output MUST be a full, standalone LaTeX file. It MUST start with \`\\documentclass{standalone}\` and MUST contain a \`\\begin{document} ... \\end{document}\` environment.
+2.  **REQUIRED PACKAGES:** You MUST include \`\\usepackage{tikz}\` and \`\\usepackage{amsmath}\` in the preamble.
+3.  **REQUIRED TIKZ LIBRARIES:** You MUST load the necessary TikZ libraries. ALWAYS include \`\\usetikzlibrary{angles,quotes,calc}\` to handle geometric annotations and calculations. This is not optional and is required to prevent compilation errors.
+4.  **TIKZ ENVIRONMENT:** All drawing commands must be inside a \`\\begin{tikzpicture} ... \\end{tikzpicture}\` environment.
+5.  **COORDINATE SCALING:** The provided coordinates are on a 100x100 grid. Scale them for a visually pleasing output (e.g., by a factor of 0.05 to fit a 5x5 area).
+6.  **OUTPUT FORMAT:** The final output must be ONLY the raw LaTeX code. Do NOT include any explanations, comments, or Markdown fences like \`\`\`latex.
+`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+        });
+
+        // Per guidelines, use response.text
+        let latexCode = response.text;
+
+        // Clean up the response just in case the model includes markdown fences
+        latexCode = latexCode.replace(/^```latex\n/i, '').replace(/\n```$/, '').trim();
+
+        return { latexCode };
+
+    } catch (error) {
+        console.error("Error generating LaTeX with Gemini:", error);
+        throw new Error("The AI service failed to generate the LaTeX code.");
+    }
 };
 
-/**
- * Generates TikZ LaTeX code from a structured geometric data object using the Gemini API.
- * @param geometryData The structured JSON object describing the geometry.
- * @returns A promise that resolves to a LatexResult object.
- */
-export const generateLatex = async (geometryData: GeometryData): Promise<LatexResult> => {
-    const model = 'gemini-2.5-flash';
+export const fixLatex = async (brokenCode: string, errorLog: string): Promise<LatexResult> => {
+    // Use the more powerful model for correction
+    const model = 'gemini-2.5-pro';
+    const prompt = `
+The following LaTeX code, intended to render a geometric figure with TikZ, has failed to compile. Your task is to act as an expert LaTeX debugger and fix it.
 
-    const prompt = `Based on the following JSON object describing geometric data, generate a complete and compilable LaTeX document using the TikZ package.
-    
-    The output MUST be a full LaTeX document as a single string in the 'latexCode' field.
-    
-    CRITICAL INSTRUCTIONS FOR FORMATTING:
-    - The 'latexCode' string value itself MUST contain newline characters (\\n) to ensure it is formatted for readability across multiple lines.
-    - DO NOT output a single-line string. The output must be human-readable when displayed.
+**Broken LaTeX Code:**
+\`\`\`latex
+${brokenCode}
+\`\`\`
 
-    The document must include:
-    1. The \\documentclass{standalone} command.
-    2. The \\usepackage{tikz} command for drawing.
-    3. The \\begin{document} and \\end{document} environment.
-    4. The TikZ picture environment (\\begin{tikzpicture} ... \\end{tikzpicture}) containing the drawing.
-    
-    The generated TikZ code must accurately represent all geometric relationships described in the JSON and be ready for compilation without errors.
+**Compilation Error Log:**
+\`\`\`
+${errorLog}
+\`\`\`
 
-    VERY IMPORTANT TIKZ SYNTAX NOTE:
-    Pay close attention to TikZ syntax. A common mistake is including extra spaces within node placement keys. For example, use '[above right]' and NOT '[above right ]'. Ensure all keys are valid and do not have leading or trailing spaces.
+**Instructions for Correction:**
 
-    JSON Data:
-    ${JSON.stringify(geometryData, null, 2)}
-    `;
+1.  **Analyze the Errors:** Carefully read the compilation error log. Identify the root cause of each error. The errors indicate problems like:
+    *   A missing \`\\documentclass{...}\` or missing \`\\begin{document}\`.
+    *   Missing packages like \`\\usepackage{tikz}\`.
+    *   Missing critical TikZ libraries, especially \`\\usetikzlibrary{angles,quotes,calc}\`. This is a very common cause of failure for angle-related commands.
+    *   Syntax errors within the \`tikzpicture\` environment (e.g., misspelled commands, incorrect options).
 
-    const response: GenerateContentResponse = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: latexSchema, // Enforce a structured JSON response
-        }
-    });
+2.  **Rewrite the Code:** Rewrite the entire LaTeX document to fix all identified errors. Do not just make minor edits.
 
-    const jsonString = response.text.trim();
+3.  **Ensure Completeness:** The corrected code MUST be a complete, standalone, and compilable document. This means it must include \`\\documentclass\`, all necessary \`\\usepackage\` and \`\\usetikzlibrary\` commands, and the \`\\begin{document}\`...\`\\end{document}\` structure.
+
+4.  **Final Output:** Return ONLY the corrected, raw LaTeX code. Do not include any explanations, apologies, or Markdown fences.
+`;
+
     try {
-        const result = JSON.parse(jsonString);
-        if (result && typeof result.latexCode === 'string') {
-            return result as LatexResult;
-        } else {
-            throw new Error('Invalid JSON structure for LaTeX response.');
-        }
-    } catch (e) {
-        console.error("Failed to parse LaTeX AI response JSON:", e);
-        console.error("Raw LaTeX response text:", jsonString);
-        throw new Error('Could not parse the JSON response for LaTeX from the AI.');
+        const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+        });
+
+        let latexCode = response.text;
+        latexCode = latexCode.replace(/^```latex\n/i, '').replace(/\n```$/, '').trim();
+
+        return { latexCode };
+    } catch (error) {
+        console.error("Error fixing LaTeX with Gemini:", error);
+        throw new Error("The AI service failed to correct the LaTeX code.");
     }
 };
