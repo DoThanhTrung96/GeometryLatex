@@ -1,4 +1,4 @@
-export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'GENERATING' | 'VERIFYING' | 'DONE' | 'ERROR';
+export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'GENERATING' | 'DONE' | 'ERROR';
 
 export interface BoundingBox {
   x: number;
@@ -21,7 +21,7 @@ export interface Line {
 
 export interface Annotation {
   label: string;
-  type: 'angle' | 'side-label';
+  type: 'angle' | 'side-label' | 'relationship';
   position: string;
 }
 
@@ -56,4 +56,10 @@ export type AnalysisResult = AnalysisSuccessResult | AnalysisFailureResult;
 
 export interface LatexResult {
   latexCode: string;
+}
+
+// Fix: Add missing VerificationResult type.
+export interface VerificationResult {
+  success: boolean;
+  log?: string;
 }

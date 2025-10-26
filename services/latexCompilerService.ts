@@ -1,54 +1,62 @@
+import type { VerificationResult } from '../types';
 
-interface VerificationResult {
-  success: boolean;
-  log?: string;
+interface CompilerResponse {
+    status: 'success' | 'error';
+    log: string;
 }
 
 /**
- * Mocks the verification of LaTeX code.
- * In a real-world application, this would typically involve a server-side
- * call to a LaTeX compiler. For this front-end example, we will simulate
- * the process with basic validation checks.
- *
+ * Verifies LaTeX code by sending it to a real online compiler.
  * @param latexCode The string of LaTeX code to be verified.
  * @returns A promise that resolves to an object indicating success or failure,
  *          along with a compilation log on failure.
  */
 export const verifyLatex = async (latexCode: string): Promise<VerificationResult> => {
-  // Simulate network delay for a more realistic user experience
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // Switched to a more reliable public CORS proxy to fix "Failed to fetch" errors.
+  const targetUrl = 'https://rtex.probablya.dev/api/v2/compile';
+  const endpoint = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
 
-  const checks = [
-    { pattern: /\\documentclass\{.*\}/, error: 'Missing or invalid \\documentclass command.' },
-    { pattern: /\\usepackage\{tikz\}/, error: 'Missing \\usepackage{tikz}. The TikZ package is required for drawing.' },
-    { pattern: /\\begin\{document\}/, error: 'Missing \\begin{document} command.' },
-    { pattern: /\\end\{document\}/, error: 'Missing \\end{document} command.' },
-    { pattern: /\\begin\{tikzpicture\}/, error: 'Missing \\begin{tikzpicture} environment.' },
-    { pattern: /\\end\{tikzpicture\}/, error: 'Missing \\end{tikzpicture} environment.' },
-  ];
+  const body = JSON.stringify({
+      code: latexCode,
+      compiler: 'pdflatex',
+  });
 
-  for (const check of checks) {
-    if (!check.pattern.test(latexCode)) {
-      console.warn(`LaTeX verification failed: ${check.error}`);
-      return {
-        success: false,
-        log: `Compilation Error: ${check.error}`,
-      };
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json',
+      },
+      body: body,
+    });
+
+    if (!response.ok) {
+      throw new Error(`The compilation service returned an error: ${response.status} ${response.statusText}`);
     }
-  }
 
-  // Check for balanced curly braces - a common source of errors
-  const openBraces = (latexCode.match(/{/g) || []).length;
-  const closeBraces = (latexCode.match(/}/g) || []).length;
-  if (openBraces !== closeBraces) {
-     const error = `Mismatched curly braces. Found ${openBraces} opening braces and ${closeBraces} closing braces.`;
-     console.warn(`LaTeX verification failed: ${error}`);
-     return {
-        success: false,
-        log: `Syntax Error: ${error}`
-     }
-  }
+    const textResponse = await response.text();
 
-  console.log('LaTeX code passed basic verification.');
-  return { success: true };
+    // Safeguard: Check if the response is an HTML error page from the proxy/service
+    if (textResponse.trim().startsWith('<!DOCTYPE html>') || textResponse.trim().startsWith('<html')) {
+        console.error("Received an HTML page instead of a JSON response from the LaTeX compiler.", textResponse.substring(0, 500));
+        throw new Error("The LaTeX verification service is currently unavailable or blocked by a security check.");
+    }
+    
+    const result: CompilerResponse = JSON.parse(textResponse);
+
+    if (result.status === 'success') {
+      console.log('LaTeX code successfully compiled.');
+      return { success: true };
+    } else {
+      console.warn('LaTeX compilation failed. See log for details.');
+      return { success: false, log: result.log };
+    }
+
+  } catch (error) {
+    console.error("Error during LaTeX verification:", error);
+    if (error instanceof Error && error.message.toLowerCase().includes('failed to fetch')) {
+         throw new Error('Failed to connect to the LaTeX compilation service: ' + error.message);
+    }
+    throw error;
+  }
 };

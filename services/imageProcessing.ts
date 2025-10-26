@@ -157,3 +157,27 @@ export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<
 
     return canvas.toDataURL('image/png').split(',')[1];
 }
+
+export const getValidatedBoundingBox = async (imageBase64: string, box: BoundingBox): Promise<BoundingBox> => {
+    const img = await loadImage(`data:image/png;base64,${imageBase64}`);
+    const imgWidth = img.width;
+    const imgHeight = img.height;
+
+    const clampedX = Math.max(0, box.x);
+    const clampedY = Math.max(0, box.y);
+
+    const clampedWidth = Math.min(box.width, imgWidth - clampedX);
+    const clampedHeight = Math.min(box.height, imgHeight - clampedY);
+
+    if (clampedWidth <= 0 || clampedHeight <= 0) {
+        console.error("AI returned an invalid bounding box:", box, "for image dimensions:", { imgWidth, imgHeight });
+        throw new Error("The AI failed to provide a valid crop area for the detected geometry.");
+    }
+
+    return {
+        x: clampedX,
+        y: clampedY,
+        width: clampedWidth,
+        height: clampedHeight,
+    };
+};

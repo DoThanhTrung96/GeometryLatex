@@ -4,9 +4,8 @@ import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
-import { preprocessImage, cropImage } from './services/imageProcessing';
-import { analyzeGeometry, generateLatex, fixLatexCode } from './services/geminiService';
-import { verifyLatex } from './services/latexCompilerService';
+import { preprocessImage, cropImage, getValidatedBoundingBox } from './services/imageProcessing';
+import { analyzeGeometry, generateLatex } from './services/geminiService';
 import { getFriendlyErrorMessage } from './services/errorService';
 import type { ProcessingStep, AnalysisSuccessResult, LatexResult } from './types';
 
@@ -94,7 +93,8 @@ function App() {
         
         setAnalysisResult(analysis);
 
-        const cropped = await cropImage(preprocessedBase64, analysis.boundingBox);
+        const validatedBox = await getValidatedBoundingBox(preprocessedBase64, analysis.boundingBox);
+        const cropped = await cropImage(preprocessedBase64, validatedBox);
         setCroppedImage(cropped);
 
         if (analysis.confidenceScore < 0.7) {
@@ -102,37 +102,8 @@ function App() {
         }
 
         setStep('GENERATING');
-        let currentLatexResult = await generateLatex(analysis.geometryData);
-
-        // --- Verification and Self-Correction Loop ---
-        setStep('VERIFYING');
-        const MAX_FIX_ATTEMPTS = 1; // Allow one attempt to fix the code
-        let lastLogError: string | null = null;
-
-        for (let attempt = 0; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
-            const verification = await verifyLatex(currentLatexResult.latexCode);
-
-            if (verification.success) {
-                setLatexResult(currentLatexResult); // Code is valid, lock it in.
-                lastLogError = null; // Clear any previous error
-                break; // Exit loop
-            }
-
-            // If verification fails
-            lastLogError = verification.log || "An unknown compilation error occurred.";
-            
-            if (attempt < MAX_FIX_ATTEMPTS) {
-                // Still have attempts left, try to fix it
-                console.warn(`LaTeX compilation failed on attempt ${attempt + 1}. Attempting to fix...`);
-                currentLatexResult = await fixLatexCode(currentLatexResult.latexCode, lastLogError);
-            }
-        }
-
-        if (lastLogError) {
-             // If we exit the loop and still have an error, it means all fix attempts failed.
-            throw new Error(`Failed to generate valid LaTeX code. The AI's attempt to fix it was also unsuccessful. Last error: ${lastLogError.substring(0, 500)}...`);
-        }
-        // --- End of Loop ---
+        const currentLatexResult = await generateLatex(analysis.geometryData);
+        setLatexResult(currentLatexResult);
         
         setStep('DONE');
     } catch (err) {
@@ -143,7 +114,7 @@ function App() {
     }
   }, [originalFile]);
 
-  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING';
+  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING';
   const isProcessing = isApiProcessing || isPreprocessing;
   const showResults = step === 'DONE' && analysisResult && latexResult && croppedImage;
 

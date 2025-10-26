@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ProcessingStep } from '../types';
-import { AnalyzeIcon, CheckIcon, ErrorIcon, VerifyIcon, CompileIcon } from './icons';
+import { AnalyzeIcon, CheckIcon, ErrorIcon, VerifyIcon } from './icons';
 
 interface StepDisplayProps {
   currentStep: ProcessingStep;
@@ -10,7 +10,6 @@ interface StepDisplayProps {
 const steps = [
   { id: 'ANALYZING', name: 'Analyzing Geometry', icon: <AnalyzeIcon /> },
   { id: 'GENERATING', name: 'Generating LaTeX', icon: <VerifyIcon /> },
-  { id: 'VERIFYING', name: 'Compiling Code', icon: <CompileIcon /> },
   { id: 'DONE', name: 'Completed', icon: <CheckIcon /> },
 ];
 

@@ -1,4 +1,3 @@
-
 /**
  * Provides a user-friendly error message from a given error object.
  * @param error The error object, which can be of any type.
@@ -8,7 +7,7 @@ export const getFriendlyErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     // Check for common, generic network errors
     if (error.message.toLowerCase().includes('failed to fetch')) {
-      return 'A network error occurred. Please check your internet connection and try again.';
+      return 'A network error occurred while communicating with the AI service. Please check your internet connection and try again.';
     }
 
     // Check for specific API error messages (example)

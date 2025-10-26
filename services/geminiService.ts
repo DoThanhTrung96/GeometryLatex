@@ -57,13 +57,13 @@ const analysisSchema = {
                 },
                 annotations: {
                     type: Type.ARRAY,
-                    description: "List of any annotations like angles or side labels. Can be empty.",
+                    description: "List of all annotations. This includes marked angles, side labels, and crucially, inferred geometric relationships like midpoints, parallelism, and perpendicularity.",
                     items: {
                         type: Type.OBJECT,
                         properties: {
-                            label: { type: Type.STRING, description: "The text of the annotation (e.g., 'a', '45°')." },
-                            type: { type: Type.STRING, description: "'angle' or 'side-label'." },
-                            position: { type: Type.STRING, description: "A semantic description of where the annotation is located (e.g., 'midpoint of BC', 'angle at vertex A')."}
+                            label: { type: Type.STRING, description: "For 'angle' or 'side-label', this is the text on the diagram (e.g., 'a', '45°'). For 'relationship', this is a full sentence describing the property (e.g., 'H is the midpoint of SE', 'Line AB is parallel to line CD', 'Line XY is perpendicular to line YZ')." },
+                            type: { type: Type.STRING, description: "The category of the annotation. Must be one of: 'angle', 'side-label', or 'relationship'." },
+                            position: { type: Type.STRING, description: "A semantic description of the annotation's location. For a relationship, this specifies the element(s) it applies to (e.g., 'segment SE', 'lines AB, CD', 'vertex C')." }
                         },
                         required: ['label', 'type', 'position']
                     }
@@ -93,12 +93,26 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
     };
 
     const textPart = {
-        text: `Analyze the provided image of a geometric diagram, which has been preprocessed to show white geometry on a black background.
-      Your task is to:
-      1. Analyze the image to find a main geometric figure. A solid-color image (e.g., all white or all black) does not count as a discernible figure.
-      2. If a figure is found, set 'geometryFound' to true and provide a tight 'boundingBox', the extracted 'geometryData', and a 'confidenceScore'.
-      3. If no discernible geometric figure is present (e.g., the image is blank, solid-colored, or contains only text), you MUST set 'geometryFound' to false and omit the 'boundingBox', 'geometryData', and 'confidenceScore' fields.
-      Respond with a JSON object conforming to the provided schema.`
+        text: `Your task is to act as an expert geometrician. Analyze the provided image of a geometric diagram, which has been preprocessed to show white geometry on a black background. Your analysis must be deep, accurate, and structured according to the JSON schema provided.
+
+      **Primary Goal: Deep Relational Understanding**
+      The most critical part of your analysis is to identify not just the components of the figure, but the **geometric relationships** between them. Simple identification of points and lines is insufficient. You must infer relationships from visual cues.
+
+      **Analysis Workflow:**
+      1.  **Figure Identification:** First, confirm a geometric figure is present. If not, set 'geometryFound' to false and stop.
+      2.  **Structural Extraction:** If a figure exists:
+          *   Define a tight 'boundingBox' around it.
+          *   Extract all 'vertices' with labels and coordinates.
+          *   Extract all 'lines' connecting vertices, noting their style ('solid' or 'dashed').
+      3.  **Deep Relationship Analysis (MANDATORY):** This is the core of your task. You MUST meticulously examine the diagram for the following relationships and report them in the 'annotations' array with the type 'relationship'.
+          *   **Midpoints:** Actively search for points that bisect line segments. For example, if a point 'H' appears to be exactly in the middle of a segment 'SE', you MUST report it. Your output should be an annotation like: { "label": "H is the midpoint of SE", "type": "relationship", "position": "segment SE" }.
+          *   **Parallelism:** Identify any visual cues (like arrows on lines) that indicate two or more lines are parallel. Report this relationship clearly. For example: { "label": "Line AB is parallel to line CD", "type": "relationship", "position": "lines AB, CD" }.
+          *   **Perpendicularity:** Identify right angle symbols or other clear indicators that lines are perpendicular. Report this relationship. For example: { "label": "Line BC is perpendicular to line CD", "type": "relationship", "position": "lines BC, CD" }.
+          *   **Angles & Congruence:** Identify all marked angles (e.g., '45°', right angle symbols) and look for tick marks or labels indicating equal lengths of sides or equal angles.
+      4.  **Confidence Score:** Provide a 'confidenceScore' reflecting your certainty in the entire analysis, especially the inferred relationships.
+
+      **Output Format:**
+      You MUST respond with a single JSON object that strictly conforms to the provided schema. The success of this task is measured by the depth and accuracy of your relationship analysis.`
     };
 
     const response: GenerateContentResponse = await ai.models.generateContent({
@@ -160,6 +174,9 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
     
     The generated TikZ code must accurately represent all geometric relationships described in the JSON and be ready for compilation without errors.
 
+    VERY IMPORTANT TIKZ SYNTAX NOTE:
+    Pay close attention to TikZ syntax. A common mistake is including extra spaces within node placement keys. For example, use '[above right]' and NOT '[above right ]'. Ensure all keys are valid and do not have leading or trailing spaces.
+
     JSON Data:
     ${JSON.stringify(geometryData, null, 2)}
     `;
@@ -185,52 +202,5 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
         console.error("Failed to parse LaTeX AI response JSON:", e);
         console.error("Raw LaTeX response text:", jsonString);
         throw new Error('Could not parse the JSON response for LaTeX from the AI.');
-    }
-};
-
-/**
- * Attempts to fix a broken LaTeX code snippet based on a compilation error log.
- * This version uses Google Search grounding to find solutions for the error.
- * @param brokenCode The LaTeX code that failed to compile.
- * @param errorLog The error log from the compiler.
- * @returns A promise that resolves to a LatexResult object with the corrected code.
- */
-export const fixLatexCode = async (brokenCode: string, errorLog: string): Promise<LatexResult> => {
-    const model = 'gemini-2.5-flash';
-
-    const prompt = `The following LaTeX code failed to compile. Below is the code and the error log from the compiler.
-    Your task is to:
-    1. Use Google Search to understand the error and find a solution. Common errors involve missing packages, incorrect syntax, or TikZ coordinate issues.
-    2. Fix the LaTeX code.
-    3. Return ONLY the complete, corrected, and compilable LaTeX document as a single block of text.
-
-    CRITICAL: Your entire response must be only the LaTeX code, starting with \\documentclass and ending with \\end{document}. Do not include any other text, explanations, markdown code fences, or JSON formatting.
-
-    --- BROKEN LATEX CODE ---
-    ${brokenCode}
-    --- END BROKEN LATEX CODE ---
-
-    --- COMPILER ERROR LOG ---
-    ${errorLog}
-    --- END COMPILER ERROR LOG ---
-    `;
-
-    const response: GenerateContentResponse = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-            tools: [{googleSearch: {}}], // Use Google Search for grounding
-        }
-    });
-
-    const fixedCode = response.text.trim();
-    
-    // The model is prompted to return only the code, so we can directly use the response text.
-    if (fixedCode.startsWith('\\documentclass')) {
-        return { latexCode: fixedCode };
-    } else {
-        // This is a fallback in case the model doesn't follow instructions perfectly.
-        console.error("Failed to get valid LaTeX code from the fix attempt. Raw response:", fixedCode);
-        throw new Error('The AI failed to return a valid LaTeX document during the fix attempt.');
     }
 };
