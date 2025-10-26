@@ -1,5 +1,5 @@
 {
   "name": "Geometry to LaTeX Converter",
-  "description": "An intelligent agent that analyzes geometric figures from images, extracts their properties, and generates corresponding LaTeX code using the TikZ library for precise redrawing.",
+  "description": "An intelligent agent that analyzes geometric figures from images and generates corresponding LaTeX code using the TikZ library. It employs a two-step AI pipeline: first, Gemini Pro performs a vision-based analysis to extract detailed geometric data (vertices, lines, annotations) from the image. Then, Gemini Flash uses this structured data to generate a complete, well-formatted, and compilable LaTeX document.",
   "requestFramePermissions": []
 }

@@ -1,7 +1,6 @@
-
 import React from 'react';
 import type { ProcessingStep } from '../types';
-import { AnalyzeIcon, CheckIcon, ErrorIcon, VerifyIcon, IdleIcon } from './icons';
+import { AnalyzeIcon, CheckIcon, ErrorIcon, VerifyIcon, CompileIcon } from './icons';
 
 interface StepDisplayProps {
   currentStep: ProcessingStep;
@@ -10,15 +9,13 @@ interface StepDisplayProps {
 
 const steps = [
   { id: 'ANALYZING', name: 'Analyzing Geometry', icon: <AnalyzeIcon /> },
-  { id: 'VERIFYING', name: 'Verifying & Generating LaTeX', icon: <VerifyIcon /> },
+  { id: 'GENERATING', name: 'Generating LaTeX', icon: <VerifyIcon /> },
+  { id: 'VERIFYING', name: 'Compiling Code', icon: <CompileIcon /> },
   { id: 'DONE', name: 'Completed', icon: <CheckIcon /> },
 ];
 
 export const StepDisplay: React.FC<StepDisplayProps> = ({ currentStep, error }) => {
-  const currentStepIndex = steps.findIndex(step => {
-    if (currentStep === 'DONE') return step.id === 'DONE';
-    return currentStep === step.id;
-  });
+  const currentStepIndex = steps.findIndex(step => step.id === currentStep);
 
   if (currentStep === 'ERROR') {
     return (
@@ -27,6 +24,9 @@ export const StepDisplay: React.FC<StepDisplayProps> = ({ currentStep, error }) 
         <div>
           <h3 className="font-bold">An Error Occurred</h3>
           <p className="text-sm">{error || 'Something went wrong.'}</p>
+          <p className="text-xs text-red-400 mt-2">
+            Please review the message above. You can try again with the same image or upload a new one.
+          </p>
         </div>
       </div>
     );

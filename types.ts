@@ -1,4 +1,4 @@
-export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'VERIFYING' | 'DONE' | 'ERROR';
+export type ProcessingStep = 'IDLE' | 'READY' | 'ANALYZING' | 'GENERATING' | 'VERIFYING' | 'DONE' | 'ERROR';
 
 export interface BoundingBox {
   x: number;

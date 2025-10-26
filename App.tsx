@@ -3,9 +3,11 @@ import { ImageUploader } from './components/ImageUploader';
 import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
-import { LogoIcon } from './components/icons';
+import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
 import { preprocessImage, cropImage } from './services/imageProcessing';
-import { analyzeGeometry, generateLatex } from './services/geminiService';
+import { analyzeGeometry, generateLatex, fixLatexCode } from './services/geminiService';
+import { verifyLatex } from './services/latexCompilerService';
+import { getFriendlyErrorMessage } from './services/errorService';
 import type { ProcessingStep, AnalysisSuccessResult, LatexResult } from './types';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
@@ -34,6 +36,21 @@ const ConfidenceIndicator = ({ score }: { score: number }) => {
   );
 };
 
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                resolve(reader.result.split(',')[1]);
+            } else {
+                reject(new Error('Failed to read file as a data URL.'));
+            }
+        };
+        reader.onerror = () => reject(new Error('Failed to read file.'));
+    });
+};
+
 
 function App() {
   const [step, setStep] = useState<ProcessingStep>('IDLE');
@@ -42,32 +59,29 @@ function App() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisSuccessResult | null>(null);
   const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
 
-  const handleImageUpload = useCallback(async (file: File) => {
+  const handleFileSelect = useCallback((file: File) => {
+    setOriginalFile(file);
     setStep('READY');
     setError(null);
     setAnalysisResult(null);
     setLatexResult(null);
     setCroppedImage(null);
-    setIsPreprocessing(true);
+  }, []);
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => {
-                if (typeof reader.result === 'string') {
-                    resolve(reader.result.split(',')[1]);
-                } else {
-                    reject(new Error('Failed to read file as a data URL.'));
-                }
-            };
-            reader.onerror = () => reject(new Error('Failed to read file.'));
-        });
-    };
+  const handleStartAnalysis = useCallback(async () => {
+    if (!originalFile) return;
+
+    setError(null);
+    setAnalysisResult(null);
+    setLatexResult(null);
+    setCroppedImage(null);
+    setIsPreprocessing(true);
+    setStep('READY'); 
 
     try {
-        const base64 = await fileToBase64(file);
+        const base64 = await fileToBase64(originalFile);
         const preprocessedBase64 = await preprocessImage(base64);
         setIsPreprocessing(false);
 
@@ -78,7 +92,6 @@ function App() {
             throw new Error("No geometric figure could be identified in the image. Please try a clearer image.");
         }
         
-        // From here, `analysis` is guaranteed to be AnalysisSuccessResult
         setAnalysisResult(analysis);
 
         const cropped = await cropImage(preprocessedBase64, analysis.boundingBox);
@@ -88,36 +101,50 @@ function App() {
             console.warn(`Low confidence score: ${analysis.confidenceScore}. Results may be inaccurate.`);
         }
 
+        setStep('GENERATING');
+        let currentLatexResult = await generateLatex(analysis.geometryData);
+
+        // --- Verification and Self-Correction Loop ---
         setStep('VERIFYING');
-        const latex = await generateLatex(analysis.geometryData);
+        const MAX_FIX_ATTEMPTS = 1; // Allow one attempt to fix the code
+        let lastLogError: string | null = null;
 
-        if (typeof latex !== 'object' || latex === null || typeof latex.latexCode !== 'string') {
-            throw new Error("Invalid LaTeX result from AI. Expected a valid object with latexCode.");
+        for (let attempt = 0; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+            const verification = await verifyLatex(currentLatexResult.latexCode);
+
+            if (verification.success) {
+                setLatexResult(currentLatexResult); // Code is valid, lock it in.
+                lastLogError = null; // Clear any previous error
+                break; // Exit loop
+            }
+
+            // If verification fails
+            lastLogError = verification.log || "An unknown compilation error occurred.";
+            
+            if (attempt < MAX_FIX_ATTEMPTS) {
+                // Still have attempts left, try to fix it
+                console.warn(`LaTeX compilation failed on attempt ${attempt + 1}. Attempting to fix...`);
+                currentLatexResult = await fixLatexCode(currentLatexResult.latexCode, lastLogError);
+            }
         }
-        setLatexResult(latex);
 
+        if (lastLogError) {
+             // If we exit the loop and still have an error, it means all fix attempts failed.
+            throw new Error(`Failed to generate valid LaTeX code. The AI's attempt to fix it was also unsuccessful. Last error: ${lastLogError.substring(0, 500)}...`);
+        }
+        // --- End of Loop ---
+        
         setStep('DONE');
     } catch (err) {
-        console.error("Processing failed:", err);
         setIsPreprocessing(false);
-        
-        let errorMessage = 'An unknown error occurred during processing.';
-        if (err instanceof Error) {
-            errorMessage = err.message;
-        } else if (typeof err === 'object' && err !== null) {
-            errorMessage = ('message' in err && typeof (err as any).message === 'string')
-                ? (err as any).message
-                : JSON.stringify(err, null, 2);
-        } else if (err) {
-            errorMessage = String(err);
-        }
-    
-        setError(errorMessage);
+        const friendlyMessage = getFriendlyErrorMessage(err);
+        setError(friendlyMessage);
         setStep('ERROR');
     }
-  }, []);
+  }, [originalFile]);
 
-  const isApiProcessing = step === 'ANALYZING' || step === 'VERIFYING';
+  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING';
+  const isProcessing = isApiProcessing || isPreprocessing;
   const showResults = step === 'DONE' && analysisResult && latexResult && croppedImage;
 
   return (
@@ -135,23 +162,50 @@ function App() {
 
         <div className="max-w-xl mx-auto mb-8">
           <ImageUploader 
-            onImageUpload={handleImageUpload} 
-            disabled={isApiProcessing || isPreprocessing}
+            onImageUpload={handleFileSelect} 
+            disabled={isProcessing}
             isProcessing={isPreprocessing}
           />
         </div>
 
-        {step !== 'IDLE' && step !== 'READY' && (
-          <div className="max-w-2xl mx-auto mb-8">
-            <StepDisplay currentStep={step} error={error} />
-          </div>
+        {originalFile && (
+           <div className="max-w-2xl mx-auto my-8 flex flex-col items-center gap-4">
+             {step !== 'IDLE' && step !== 'READY' && (
+               <div className="w-full">
+                 <StepDisplay currentStep={step} error={error} />
+               </div>
+             )}
+            
+             <button
+               onClick={handleStartAnalysis}
+               disabled={isProcessing}
+               className="flex items-center justify-center gap-3 w-52 h-12 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 transition-all duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed text-lg"
+             >
+               {isProcessing ? (
+                 <>
+                   <SpinnerIcon />
+                   <span>Processing...</span>
+                 </>
+               ) : (step === 'DONE' || step === 'ERROR') ? (
+                 <>
+                   <RetryIcon className="w-5 h-5" />
+                   <span>Re-analyze</span>
+                 </>
+               ) : (
+                 <>
+                   <PlayIcon className="w-5 h-5" />
+                   <span>Analyze Image</span>
+                 </>
+               )}
+             </button>
+           </div>
         )}
 
         {showResults && (
           <div className="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
             <ResultCard title="Isolated Geometry">
-              <div className="bg-black p-2 rounded-lg border border-slate-700 flex justify-center items-center">
-                 <img src={`data:image/png;base64,${croppedImage}`} alt="Isolated geometric figure" className="max-w-full h-auto rounded-sm" />
+              <div className="bg-black p-2 rounded-lg border border-slate-700 flex justify-center items-center flex-grow">
+                 <img src={`data:image/png;base64,${croppedImage}`} alt="Isolated geometric figure" className="max-w-full max-h-full object-contain rounded-sm" />
               </div>
             </ResultCard>
              <ResultCard title="Analysis Confidence">

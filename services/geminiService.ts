@@ -146,13 +146,19 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
 
     const prompt = `Based on the following JSON object describing geometric data, generate a complete and compilable LaTeX document using the TikZ package.
     
-    The output MUST be a full LaTeX document as a single string in the 'latexCode' field, including:
+    The output MUST be a full LaTeX document as a single string in the 'latexCode' field.
+    
+    CRITICAL INSTRUCTIONS FOR FORMATTING:
+    - The 'latexCode' string value itself MUST contain newline characters (\\n) to ensure it is formatted for readability across multiple lines.
+    - DO NOT output a single-line string. The output must be human-readable when displayed.
+
+    The document must include:
     1. The \\documentclass{standalone} command.
     2. The \\usepackage{tikz} command for drawing.
     3. The \\begin{document} and \\end{document} environment.
     4. The TikZ picture environment (\\begin{tikzpicture} ... \\end{tikzpicture}) containing the drawing.
     
-    Ensure the generated TikZ code is well-formatted with newlines for readability. It must accurately represent all geometric relationships described in the JSON and be ready for compilation without errors.
+    The generated TikZ code must accurately represent all geometric relationships described in the JSON and be ready for compilation without errors.
 
     JSON Data:
     ${JSON.stringify(geometryData, null, 2)}
@@ -179,5 +185,56 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
         console.error("Failed to parse LaTeX AI response JSON:", e);
         console.error("Raw LaTeX response text:", jsonString);
         throw new Error('Could not parse the JSON response for LaTeX from the AI.');
+    }
+};
+
+/**
+ * Attempts to fix a broken LaTeX code snippet based on a compilation error log.
+ * @param brokenCode The LaTeX code that failed to compile.
+ * @param errorLog The error log from the compiler.
+ * @returns A promise that resolves to a LatexResult object with the corrected code.
+ */
+export const fixLatexCode = async (brokenCode: string, errorLog: string): Promise<LatexResult> => {
+    const model = 'gemini-2.5-flash';
+
+    const prompt = `The following LaTeX code failed to compile. Below is the code and the error log from the compiler.
+    Your task is to analyze the error log, fix the LaTeX code, and return a complete, compilable LaTeX document as a single string in the 'latexCode' field of a JSON object.
+
+    CRITICAL INSTRUCTIONS FOR FORMATTING (these still apply):
+    - The 'latexCode' string value itself MUST contain newline characters (\\n) to ensure it is formatted for readability.
+    - The output must be a full LaTeX document, including \\documentclass, \\usepackage, and document environments.
+
+    --- BROKEN LATEX CODE ---
+    ${brokenCode}
+    --- END BROKEN LATEX CODE ---
+
+    --- COMPILER ERROR LOG ---
+    ${errorLog}
+    --- END COMPILER ERROR LOG ---
+
+    Now, provide the corrected code in the specified JSON format.
+    `;
+
+    const response: GenerateContentResponse = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: latexSchema,
+        }
+    });
+
+    const jsonString = response.text.trim();
+    try {
+        const result = JSON.parse(jsonString);
+        if (result && typeof result.latexCode === 'string') {
+            return result as LatexResult;
+        } else {
+            throw new Error('Invalid JSON structure for LaTeX fix response.');
+        }
+    } catch (e) {
+        console.error("Failed to parse LaTeX fix AI response JSON:", e);
+        console.error("Raw LaTeX fix response text:", jsonString);
+        throw new Error('Could not parse the JSON response for LaTeX fix from the AI.');
     }
 };
