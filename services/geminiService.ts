@@ -148,6 +148,7 @@ ${JSON.stringify(geometryData, null, 2)}
 4.  **TIKZ ENVIRONMENT:** All drawing commands must be inside a \`\\begin{tikzpicture} ... \\end{tikzpicture}\` environment.
 5.  **COORDINATE SCALING:** The provided coordinates are on a 100x100 grid. Scale them for a visually pleasing output (e.g., by a factor of 0.05 to fit a 5x5 area).
 6.  **OUTPUT FORMAT:** The final output must be ONLY the raw LaTeX code. Do NOT include any explanations, comments, or Markdown fences like \`\`\`latex.
+7.  **CODE FORMATTING:** The generated LaTeX code MUST be well-formatted and human-readable. Use proper indentation and ensure commands are on separate lines (using newline characters). Do not output a single, minified line of code.
 `;
 
     try {
@@ -199,6 +200,7 @@ ${errorLog}
 3.  **Ensure Completeness:** The corrected code MUST be a complete, standalone, and compilable document. This means it must include \`\\documentclass\`, all necessary \`\\usepackage\` and \`\\usetikzlibrary\` commands, and the \`\\begin{document}\`...\`\\end{document}\` structure.
 
 4.  **Final Output:** Return ONLY the corrected, raw LaTeX code. Do not include any explanations, apologies, or Markdown fences.
+5.  **CODE FORMATTING:** The corrected code must be well-formatted and human-readable, with proper indentation and newlines.
 `;
 
     try {

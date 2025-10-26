@@ -1,3 +1,4 @@
+
 import type { BoundingBox } from '../types';
 
 const loadImage = (src: string): Promise<HTMLImageElement> => {
@@ -7,6 +8,19 @@ const loadImage = (src: string): Promise<HTMLImageElement> => {
         img.onerror = () => reject(new Error('Failed to load image from data.'));
         img.src = src;
     });
+};
+
+const calculateAverageBrightness = (imageData: ImageData): number => {
+    const data = imageData.data;
+    let totalBrightness = 0;
+    const pixelCount = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+        // Standard luminance calculation
+        totalBrightness += (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+    }
+    
+    return totalBrightness / pixelCount;
 };
 
 const toGrayscale = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -24,11 +38,19 @@ const toGrayscale = (ctx: CanvasRenderingContext2D, width: number, height: numbe
 const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
-    const threshold = 128; 
+    
+    // Step 1: Calculate the average brightness of the (already grayscaled) image.
+    let totalGrayValue = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        totalGrayValue += data[i];
+    }
+    const adaptiveThreshold = totalGrayValue / (data.length / 4);
 
+    // Step 2: Binarize based on the adaptive threshold.
+    // Pixels darker than average are part of the figure (turn white), others are background (turn black).
     for (let i = 0; i < data.length; i += 4) {
         const grayValue = data[i];
-        const finalValue = grayValue < threshold ? 255 : 0;
+        const finalValue = grayValue < adaptiveThreshold ? 255 : 0;
         data[i] = finalValue;
         data[i + 1] = finalValue;
         data[i + 2] = finalValue;
@@ -37,7 +59,7 @@ const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height:
     ctx.putImageData(imageData, 0, 0);
 };
 
-const isRowDark = (imageData: ImageData, y: number, threshold = 50, tolerance = 0.95): boolean => {
+const isRowDark = (imageData: ImageData, y: number, threshold: number, tolerance = 0.95): boolean => {
     const { width, data } = imageData;
     let darkPixels = 0;
     for (let x = 0; x < width; x++) {
@@ -50,7 +72,7 @@ const isRowDark = (imageData: ImageData, y: number, threshold = 50, tolerance = 
     return (darkPixels / width) > tolerance;
 };
 
-const isColDark = (imageData: ImageData, x: number, threshold = 50, tolerance = 0.95): boolean => {
+const isColDark = (imageData: ImageData, x: number, threshold: number, tolerance = 0.95): boolean => {
     const { height, width, data } = imageData;
     let darkPixels = 0;
     for (let y = 0; y < height; y++) {
@@ -63,37 +85,68 @@ const isColDark = (imageData: ImageData, x: number, threshold = 50, tolerance = 
     return (darkPixels / height) > tolerance;
 }
 
-const autoCropFrame = (ctx: CanvasRenderingContext2D, width: number, height: number): BoundingBox => {
+const detectAndCropBorder = (ctx: CanvasRenderingContext2D, width: number, height: number): BoundingBox => {
     const imageData = ctx.getImageData(0, 0, width, height);
-    
+    const FRAME_SCAN_TOLERANCE = 15; // Max gap size in pixels to tolerate for a dashed line.
+
+    // Calculate a dynamic threshold for what is considered a "dark" border pixel.
+    // This makes the detection robust against images with different overall brightness levels.
+    const averageBrightness = calculateAverageBrightness(imageData);
+    const darknessThreshold = Math.max(20, averageBrightness * 0.5); // A pixel is part of the border if it's 50% darker than average, with a floor of 20.
+
+
     let top = 0;
-    for (let y = 0; y < height / 2; y++) {
-        if (!isRowDark(imageData, y)) {
-            top = y;
+    let consecutiveNonDarkRows = 0;
+    for (let y = 0; y < height; y++) {
+        if (isRowDark(imageData, y, darknessThreshold)) {
+            consecutiveNonDarkRows = 0; // Reset counter, this is part of the frame
+        } else {
+            consecutiveNonDarkRows++;
+        }
+        if (consecutiveNonDarkRows > FRAME_SCAN_TOLERANCE) {
+            top = y - FRAME_SCAN_TOLERANCE;
             break;
         }
     }
 
     let bottom = height;
-    for (let y = height - 1; y >= Math.floor(height / 2); y--) {
-        if (!isRowDark(imageData, y)) {
-            bottom = y;
+    consecutiveNonDarkRows = 0;
+    for (let y = height - 1; y >= 0; y--) {
+        if (isRowDark(imageData, y, darknessThreshold)) {
+            consecutiveNonDarkRows = 0;
+        } else {
+            consecutiveNonDarkRows++;
+        }
+        if (consecutiveNonDarkRows > FRAME_SCAN_TOLERANCE) {
+            bottom = y + FRAME_SCAN_TOLERANCE;
             break;
         }
     }
 
     let left = 0;
-    for (let x = 0; x < width / 2; x++) {
-        if (!isColDark(imageData, x)) {
-            left = x;
+    let consecutiveNonDarkCols = 0;
+    for (let x = 0; x < width; x++) {
+        if (isColDark(imageData, x, darknessThreshold)) {
+            consecutiveNonDarkCols = 0;
+        } else {
+            consecutiveNonDarkCols++;
+        }
+        if (consecutiveNonDarkCols > FRAME_SCAN_TOLERANCE) {
+            left = x - FRAME_SCAN_TOLERANCE;
             break;
         }
     }
 
     let right = width;
-    for (let x = width - 1; x >= Math.floor(width / 2); x--) {
-        if (!isColDark(imageData, x)) {
-            right = x;
+    consecutiveNonDarkCols = 0;
+    for (let x = width - 1; x >= 0; x--) {
+        if (isColDark(imageData, x, darknessThreshold)) {
+            consecutiveNonDarkCols = 0;
+        } else {
+            consecutiveNonDarkCols++;
+        }
+        if (consecutiveNonDarkCols > FRAME_SCAN_TOLERANCE) {
+            right = x + FRAME_SCAN_TOLERANCE;
             break;
         }
     }
@@ -128,8 +181,9 @@ export const preprocessImage = async (imageBase64: string): Promise<string> => {
     }
     originalCtx.drawImage(img, 0, 0);
 
-    // Step 1: Automatically detect and calculate the crop for any dark, solid frames.
-    const contentBox = autoCropFrame(originalCtx, originalCanvas.width, originalCanvas.height);
+    // Step 1: Detect and crop any dark border around the geometry.
+    // This now uses an adaptive threshold to reliably find the border in images of varying brightness.
+    const contentBox = detectAndCropBorder(originalCtx, originalCanvas.width, originalCanvas.height);
     
     // Step 2: Create a new canvas with the cropped dimensions and draw the content.
     const croppedCanvas = document.createElement('canvas');
@@ -145,8 +199,11 @@ export const preprocessImage = async (imageBase64: string): Promise<string> => {
         0, 0, contentBox.width, contentBox.height
     );
 
-    // Step 3: Perform the standard grayscale and inversion on the frame-less, cropped image.
+    // Step 3: Convert the border-less image to grayscale.
     toGrayscale(croppedCtx, croppedCanvas.width, croppedCanvas.height);
+
+    // Step 4: Binarize and invert the image using an adaptive threshold
+    // calculated from the cropped image's average brightness. This isolates the geometry.
     binarizeAndInvert(croppedCtx, croppedCanvas.width, croppedCanvas.height);
     
     return croppedCanvas.toDataURL('image/png').split(',')[1];
