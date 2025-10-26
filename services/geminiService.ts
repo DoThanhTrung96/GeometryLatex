@@ -190,6 +190,7 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
 
 /**
  * Attempts to fix a broken LaTeX code snippet based on a compilation error log.
+ * This version uses Google Search grounding to find solutions for the error.
  * @param brokenCode The LaTeX code that failed to compile.
  * @param errorLog The error log from the compiler.
  * @returns A promise that resolves to a LatexResult object with the corrected code.
@@ -198,11 +199,12 @@ export const fixLatexCode = async (brokenCode: string, errorLog: string): Promis
     const model = 'gemini-2.5-flash';
 
     const prompt = `The following LaTeX code failed to compile. Below is the code and the error log from the compiler.
-    Your task is to analyze the error log, fix the LaTeX code, and return a complete, compilable LaTeX document as a single string in the 'latexCode' field of a JSON object.
+    Your task is to:
+    1. Use Google Search to understand the error and find a solution. Common errors involve missing packages, incorrect syntax, or TikZ coordinate issues.
+    2. Fix the LaTeX code.
+    3. Return ONLY the complete, corrected, and compilable LaTeX document as a single block of text.
 
-    CRITICAL INSTRUCTIONS FOR FORMATTING (these still apply):
-    - The 'latexCode' string value itself MUST contain newline characters (\\n) to ensure it is formatted for readability.
-    - The output must be a full LaTeX document, including \\documentclass, \\usepackage, and document environments.
+    CRITICAL: Your entire response must be only the LaTeX code, starting with \\documentclass and ending with \\end{document}. Do not include any other text, explanations, markdown code fences, or JSON formatting.
 
     --- BROKEN LATEX CODE ---
     ${brokenCode}
@@ -211,30 +213,24 @@ export const fixLatexCode = async (brokenCode: string, errorLog: string): Promis
     --- COMPILER ERROR LOG ---
     ${errorLog}
     --- END COMPILER ERROR LOG ---
-
-    Now, provide the corrected code in the specified JSON format.
     `;
 
     const response: GenerateContentResponse = await ai.models.generateContent({
         model,
         contents: prompt,
         config: {
-            responseMimeType: "application/json",
-            responseSchema: latexSchema,
+            tools: [{googleSearch: {}}], // Use Google Search for grounding
         }
     });
 
-    const jsonString = response.text.trim();
-    try {
-        const result = JSON.parse(jsonString);
-        if (result && typeof result.latexCode === 'string') {
-            return result as LatexResult;
-        } else {
-            throw new Error('Invalid JSON structure for LaTeX fix response.');
-        }
-    } catch (e) {
-        console.error("Failed to parse LaTeX fix AI response JSON:", e);
-        console.error("Raw LaTeX fix response text:", jsonString);
-        throw new Error('Could not parse the JSON response for LaTeX fix from the AI.');
+    const fixedCode = response.text.trim();
+    
+    // The model is prompted to return only the code, so we can directly use the response text.
+    if (fixedCode.startsWith('\\documentclass')) {
+        return { latexCode: fixedCode };
+    } else {
+        // This is a fallback in case the model doesn't follow instructions perfectly.
+        console.error("Failed to get valid LaTeX code from the fix attempt. Raw response:", fixedCode);
+        throw new Error('The AI failed to return a valid LaTeX document during the fix attempt.');
     }
 };

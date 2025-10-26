@@ -4,7 +4,7 @@ const loadImage = (src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Failed to load image from data.')); // Pass a proper Error object
+        img.onerror = () => reject(new Error('Failed to load image from data.'));
         img.src = src;
     });
 };
@@ -21,75 +21,130 @@ const toGrayscale = (ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.putImageData(imageData, 0, 0);
 };
 
-/**
- * Binarizes the image based on a threshold, inverts the colors, and ensures it is opaque.
- * Assumes a grayscale image is on the canvas.
- * This turns dark lines on a light background into bright white lines on a black background.
- * @param ctx The canvas rendering context.
- * @param width The width of the canvas.
- * @param height The height of the canvas.
- */
 const binarizeAndInvert = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
-    const threshold = 128; // Pixels darker than this are considered part of a line.
+    const threshold = 128; 
 
     for (let i = 0; i < data.length; i += 4) {
-        // data[i] is the grayscale value because toGrayscale was called first.
         const grayValue = data[i];
-
-        // If the pixel is darker than the threshold, it's part of the geometry (make it white).
-        // If it's lighter, it's part of the background (make it black).
         const finalValue = grayValue < threshold ? 255 : 0;
-
-        data[i] = finalValue;     // red
-        data[i + 1] = finalValue; // green
-        data[i + 2] = finalValue; // blue
-        data[i + 3] = 255;        // Force alpha to be fully opaque.
+        data[i] = finalValue;
+        data[i + 1] = finalValue;
+        data[i + 2] = finalValue;
+        data[i + 3] = 255;
     }
     ctx.putImageData(imageData, 0, 0);
 };
 
-
-/**
- * Applies a robust series of filters to an image to prepare it for geometry analysis.
- * The new pipeline is: Grayscale -> Binarize & Invert.
- * This creates a high-contrast, clean, opaque image with solid white features on a solid black background,
- * which is much more reliable for AI analysis than edge detection.
- * @param imageBase64 The base64 encoded source image.
- * @returns A promise that resolves with the base64 encoded, preprocessed PNG image.
- */
-export const preprocessImage = async (imageBase64: string): Promise<string> => {
-    const img = await loadImage(`data:image/unknown;base64,${imageBase64}`);
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) {
-        throw new Error('Could not get canvas context');
+const isRowDark = (imageData: ImageData, y: number, threshold = 50, tolerance = 0.95): boolean => {
+    const { width, data } = imageData;
+    let darkPixels = 0;
+    for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+        if (avg < threshold) {
+            darkPixels++;
+        }
     }
-    ctx.drawImage(img, 0, 0);
-
-    // 1. Convert to grayscale to work with a single channel for thresholding.
-    toGrayscale(ctx, canvas.width, canvas.height);
-
-    // 2. Binarize and Invert the image. This makes the geometry lines solid white and
-    // the background solid black, providing a very clear input for the AI model to analyze.
-    // This new method is far more effective than the previous edge detection filter.
-    binarizeAndInvert(ctx, canvas.width, canvas.height);
-    
-    // Return as a PNG base64 string for lossless transmission to the AI.
-    return canvas.toDataURL('image/png').split(',')[1];
+    return (darkPixels / width) > tolerance;
 };
 
-/**
- * Crops an image using the provided bounding box.
- * @param imageBase64 The base64 encoded source image to crop.
- * @param box The bounding box with x, y, width, and height.
- * @returns A promise that resolves with the base64 encoded, cropped PNG image.
- */
+const isColDark = (imageData: ImageData, x: number, threshold = 50, tolerance = 0.95): boolean => {
+    const { height, width, data } = imageData;
+    let darkPixels = 0;
+    for (let y = 0; y < height; y++) {
+        const i = (y * width + x) * 4;
+        const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+        if (avg < threshold) {
+            darkPixels++;
+        }
+    }
+    return (darkPixels / height) > tolerance;
+}
+
+const autoCropFrame = (ctx: CanvasRenderingContext2D, width: number, height: number): BoundingBox => {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    
+    let top = 0;
+    for (let y = 0; y < height / 2; y++) {
+        if (!isRowDark(imageData, y)) {
+            top = y;
+            break;
+        }
+    }
+
+    let bottom = height;
+    for (let y = height - 1; y >= Math.floor(height / 2); y--) {
+        if (!isRowDark(imageData, y)) {
+            bottom = y;
+            break;
+        }
+    }
+
+    let left = 0;
+    for (let x = 0; x < width / 2; x++) {
+        if (!isColDark(imageData, x)) {
+            left = x;
+            break;
+        }
+    }
+
+    let right = width;
+    for (let x = width - 1; x >= Math.floor(width / 2); x--) {
+        if (!isColDark(imageData, x)) {
+            right = x;
+            break;
+        }
+    }
+
+    const croppedWidth = Math.max(1, right - left);
+    const croppedHeight = Math.max(1, bottom - top);
+
+    return {
+        x: left,
+        y: top,
+        width: croppedWidth,
+        height: croppedHeight,
+    };
+};
+
+export const preprocessImage = async (imageBase64: string): Promise<string> => {
+    const img = await loadImage(`data:image/unknown;base64,${imageBase64}`);
+    const originalCanvas = document.createElement('canvas');
+    originalCanvas.width = img.width;
+    originalCanvas.height = img.height;
+    const originalCtx = originalCanvas.getContext('2d', { willReadFrequently: true });
+    if (!originalCtx) {
+        throw new Error('Could not get canvas context');
+    }
+    originalCtx.drawImage(img, 0, 0);
+
+    // Step 1: Automatically detect and calculate the crop for any dark, solid frames.
+    const contentBox = autoCropFrame(originalCtx, originalCanvas.width, originalCanvas.height);
+    
+    // Step 2: Create a new canvas with the cropped dimensions and draw the content.
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = contentBox.width;
+    croppedCanvas.height = contentBox.height;
+    const croppedCtx = croppedCanvas.getContext('2d', { willReadFrequently: true });
+    if (!croppedCtx) {
+        throw new Error('Could not get canvas context for cropping');
+    }
+    croppedCtx.drawImage(
+        originalCanvas, 
+        contentBox.x, contentBox.y, contentBox.width, contentBox.height,
+        0, 0, contentBox.width, contentBox.height
+    );
+
+    // Step 3: Perform the standard grayscale and inversion on the frame-less, cropped image.
+    toGrayscale(croppedCtx, croppedCanvas.width, croppedCanvas.height);
+    binarizeAndInvert(croppedCtx, croppedCanvas.width, croppedCanvas.height);
+    
+    return croppedCanvas.toDataURL('image/png').split(',')[1];
+};
+
 export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<string> => {
-    // We load the preprocessed image, which is guaranteed to be a PNG from our pipeline
     const img = await loadImage(`data:image/png;base64,${imageBase64}`);
     const canvas = document.createElement('canvas');
     canvas.width = box.width;
@@ -98,9 +153,7 @@ export const cropImage = async (imageBase64: string, box: BoundingBox): Promise<
      if (!ctx) {
         throw new Error('Could not get canvas context for cropping');
     }
-    // Draw the relevant part of the source image onto the new, smaller canvas
     ctx.drawImage(img, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
 
-    // Using image/png for lossless cropping
     return canvas.toDataURL('image/png').split(',')[1];
 }
