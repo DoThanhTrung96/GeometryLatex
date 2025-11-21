@@ -5,10 +5,13 @@ import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
 import { preprocessImage, cropImage, getValidatedBoundingBox } from './services/imageProcessing';
-import { analyzeGeometry, generateLatex, fixLatex } from './services/geminiService';
+import * as geminiService from './services/geminiService';
+import * as perplexityService from './services/perplexityService';
 import { verifyLatex } from './services/latexCompilerService';
 import { getFriendlyErrorMessage } from './services/errorService';
 import type { ProcessingStep, AnalysisSuccessResult, LatexResult, VerificationResult } from './types';
+
+type AIProvider = 'gemini' | 'perplexity';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
@@ -60,6 +63,7 @@ function App() {
   const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [aiProvider, setAiProvider] = useState<AIProvider>('perplexity');
 
   const handleFileSelect = useCallback((file: File) => {
     setOriginalFile(file);
@@ -80,13 +84,16 @@ function App() {
     setIsPreprocessing(true);
     setStep('READY'); 
 
+    // Select the appropriate AI service based on provider
+    const aiService = aiProvider === 'perplexity' ? perplexityService : geminiService;
+
     try {
         const base64 = await fileToBase64(originalFile);
         const preprocessedBase64 = await preprocessImage(base64);
         setIsPreprocessing(false);
 
         setStep('ANALYZING');
-        const analysis = await analyzeGeometry(preprocessedBase64, 'image/png');
+        const analysis = await aiService.analyzeGeometry(preprocessedBase64, 'image/png');
         
         if (!analysis.geometryFound) {
             throw new Error("No geometric figure could be identified in the image. Please try a clearer image.");
@@ -108,7 +115,7 @@ function App() {
         const MAX_CORRECTION_ATTEMPTS = 2;
 
         setStep('GENERATING');
-        const initialResult = await generateLatex(analysis.geometryData);
+        const initialResult = await aiService.generateLatex(analysis.geometryData);
         currentLatexCode = initialResult.latexCode;
 
         for (let attempt = 0; attempt <= MAX_CORRECTION_ATTEMPTS; attempt++) {
@@ -129,7 +136,7 @@ function App() {
             }
 
             setStep('CORRECTING');
-            const correctedResult = await fixLatex(currentLatexCode, verificationResult.log || "Unknown compilation error.");
+            const correctedResult = await aiService.fixLatex(currentLatexCode, verificationResult.log || "Unknown compilation error.");
             currentLatexCode = correctedResult.latexCode;
         }
         
@@ -145,7 +152,7 @@ function App() {
         setError(friendlyMessage);
         setStep('ERROR');
     }
-  }, [originalFile]);
+  }, [originalFile, aiProvider]);
 
   const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING' || step === 'CORRECTING';
   const isProcessing = isApiProcessing || isPreprocessing;
@@ -162,6 +169,34 @@ function App() {
           <p className="mt-2 text-lg text-slate-400">
             Upload a geometric diagram, and get its TikZ LaTeX code instantly.
           </p>
+          
+          {/* AI Provider Selector */}
+          <div className="mt-6 flex justify-center gap-4">
+            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <input
+                type="radio"
+                name="aiProvider"
+                value="perplexity"
+                checked={aiProvider === 'perplexity'}
+                onChange={(e) => setAiProvider(e.target.value as AIProvider)}
+                disabled={step !== 'IDLE' && step !== 'READY' && step !== 'DONE' && step !== 'ERROR'}
+                className="cursor-pointer"
+              />
+              <span className="font-medium">Perplexity</span>
+            </label>
+            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <input
+                type="radio"
+                name="aiProvider"
+                value="gemini"
+                checked={aiProvider === 'gemini'}
+                onChange={(e) => setAiProvider(e.target.value as AIProvider)}
+                disabled={step !== 'IDLE' && step !== 'READY' && step !== 'DONE' && step !== 'ERROR'}
+                className="cursor-pointer"
+              />
+              <span className="font-medium">Gemini</span>
+            </label>
+          </div>
         </header>
 
         <div className="max-w-xl mx-auto mb-8">
@@ -226,7 +261,7 @@ function App() {
 
       </main>
       <footer className="text-center p-4 text-slate-500 text-sm">
-        <p>Powered by Gemini API</p>
+        <p>Powered by Perplexity AI</p>
       </footer>
     </div>
   );
