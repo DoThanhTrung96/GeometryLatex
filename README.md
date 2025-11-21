@@ -1,42 +1,139 @@
-# GeoLaTeX Agent - Project Overview
+# GeoLaTeX Agent
 
-This project is a sophisticated web application that acts as an intelligent agent to convert images of geometric diagrams into compilable LaTeX code using the TikZ library. It leverages the Google Gemini API for its core intelligence, featuring an advanced self-correction mechanism to ensure code quality.
+An intelligent web application that converts images of geometric diagrams into compilable LaTeX code using the TikZ library. Powered by Google Gemini API with advanced self-correction capabilities.
 
-### Project Goal
+## Features
 
-The primary goal is to automate the tedious process of writing LaTeX code for geometric figures. A user can simply upload a picture of a diagram (e.g., from a textbook or a sketch), and the application will analyze it, generate the precise TikZ code, verify it, and even debug its own code if compilation errors are found.
+- 🖼️ **Image Upload**: Drag & drop or select geometric diagram images
+- 🤖 **AI Analysis**: Google Gemini 2.5 Pro analyzes geometry structure
+- 📝 **LaTeX Generation**: Automatic TikZ code generation
+- ✅ **Self-Correction**: Validates and debugs generated LaTeX code
+- 🎨 **Modern UI**: Clean interface with Tailwind CSS
+- 📊 **Confidence Score**: AI confidence rating for analysis quality
 
-### Core Technologies
+## Quick Start
 
-*   **Frontend:** React with TypeScript, providing a robust and type-safe development environment.
-*   **Styling:** Tailwind CSS is used for a modern, responsive, and utility-first design.
-*   **AI Engine:** The application is powered by the **Google Gemini API**. It uses the powerful **`gemini-2.5-pro`** model for all core AI tasks, including vision analysis, code generation, and code correction, to ensure the highest quality results.
-*   **Image Processing:** Advanced, client-side image manipulation is handled in the browser using the **Canvas API**.
-*   **Verification:** An external, live LaTeX compilation service is used to validate the AI-generated code, providing a crucial feedback loop.
+### Prerequisites
 
-### Application Workflow
+- Node.js (v18 or higher)
+- Google Gemini API key
 
-The process is a robust, multi-step pipeline that includes a closed-loop feedback system for self-correction:
+### Installation
 
-1.  **Image Upload & Adaptive Preprocessing:** The user uploads an image. The application performs intelligent preprocessing in the browser. This is not a simple filter; it adaptively detects and crops dark borders (both solid and dashed), calculates dynamic thresholds for binarization, and inverts the image to create a high-contrast, standardized input that is optimal for AI analysis.
-2.  **AI Geometry Analysis (`gemini-2.5-pro`):** The processed image is sent to Gemini Pro. The model identifies the geometric figure and returns a structured JSON object containing:
-    *   The figure's **bounding box** for precise cropping.
-    *   Detailed **geometric data**, including vertices, lines (with styles), and annotations.
-    *   A **confidence score** indicating its certainty.
-3.  **Initial AI LaTeX Generation (`gemini-2.5-pro`):** The structured JSON data is sent back to Gemini Pro, which acts as a specialized LaTeX programmer to generate the first draft of a complete and compilable TikZ document.
-4.  **Verification & Self-Correction Loop:**
-    *   **Verify:** The generated LaTeX code is sent to an external online compiler.
-    *   **Check:** If the code compiles successfully, the process is complete.
-    *   **Correct:** If the compiler returns errors, the agent enters a debugging phase. The original faulty code and the compiler's error log are sent back to Gemini Pro. The AI is instructed to act as an expert LaTeX debugger, analyze the errors, and rewrite the code to fix them. This loop can repeat multiple times to maximize the chance of a successful result.
-5.  **Displaying Results:** The UI presents the final, validated output in a clean layout, showing:
-    *   The isolated geometric figure.
-    *   The AI's confidence score.
-    *   The final, formatted, and compilable LaTeX code with a convenient copy button.
+```bash
+# Install dependencies
+npm install
 
-### Key Features & UI/UX Highlights
+# Set up environment variables
+cp .env.example .env
+# Edit .env and add your GEMINI_API_KEY
 
-*   **AI Self-Correction:** The application's standout feature is its ability to validate and debug its own code, making it significantly more reliable than a simple one-shot generator.
-*   **Intelligent Image Preprocessing:** The adaptive cropping and filtering logic makes the agent resilient to varied image sources and quality.
-*   **Detailed Progress Indicator:** The UI provides clear, step-by-step feedback, showing the user the active stage of the process, including "Verifying" and "Self-Correcting."
-*   **Organized Results:** The output is neatly arranged in cards, separating the visual result from the underlying data and the final code.
-*   **Developer-Friendly Output:** The generated code is displayed in a formatted block with a one-click copy button, ready for immediate use.
+# Start development server
+npm run dev
+```
+
+The application will be available at `http://localhost:3000`
+
+### Build for Production
+
+```bash
+npm run build
+npm run preview
+```
+
+## Project Structure
+
+```
+GeometryLatex/
+├── src/                      # Source code
+│   ├── App.tsx              # Main application component
+│   ├── index.tsx            # Entry point
+│   ├── types.ts             # TypeScript type definitions
+│   ├── components/          # React components
+│   │   ├── CodeBlock.tsx
+│   │   ├── icons.tsx
+│   │   ├── ImageUploader.tsx
+│   │   ├── ResultCard.tsx
+│   │   └── StepDisplay.tsx
+│   └── services/            # Business logic
+│       ├── errorService.ts
+│       ├── geminiService.ts
+│       ├── imageProcessing.ts
+│       └── latexCompilerService.ts
+├── public/                  # Static assets
+│   └── images/             # Test images
+├── docs/                   # Documentation
+├── dist/                   # Build output
+└── index.html             # HTML entry point
+```
+
+## How It Works
+
+## How It Works
+
+1. **Image Upload & Preprocessing**
+   - Upload geometric diagram image
+   - Intelligent border detection and cropping
+   - Adaptive grayscale conversion and binarization
+
+2. **AI Geometry Analysis**
+   - Gemini 2.5 Pro analyzes the image
+   - Extracts vertices, lines, and annotations
+   - Returns structured JSON with bounding box and confidence score
+
+3. **LaTeX Code Generation**
+   - Gemini 2.5 Pro generates complete TikZ document
+   - Includes all necessary packages and libraries
+   - Properly formatted and human-readable
+
+4. **Verification & Self-Correction**
+   - Code sent to external LaTeX compiler
+   - If errors occur, AI debugs and rewrites code
+   - Repeats until successful compilation (up to 2 attempts)
+
+5. **Display Results**
+   - Shows isolated geometric figure
+   - Displays confidence score
+   - Provides copyable LaTeX code
+
+## Technologies
+
+- **Frontend**: React 19.2 with TypeScript
+- **Build Tool**: Vite 6.2
+- **AI**: Google Gemini API (@google/genai 1.27)
+- **Styling**: Tailwind CSS (via CDN)
+- **Image Processing**: HTML5 Canvas API
+- **LaTeX Verification**: External compilation service
+
+## Development
+
+```bash
+# Start dev server with hot reload
+npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
+```
+
+## Environment Variables
+
+Create a `.env` file in the root directory:
+
+```env
+GEMINI_API_KEY=your_google_gemini_api_key_here
+```
+
+## Documentation
+
+See the `docs/` directory for detailed documentation:
+- Implementation guides
+- Testing procedures
+- Troubleshooting tips
+- Feature enhancements
+
+## License
+
+This project is for educational and research purposes.
