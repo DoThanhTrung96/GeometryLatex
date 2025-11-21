@@ -13,6 +13,19 @@ dist
 dist-ssr
 *.local
 
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# API Keys and credentials (security)
+*.key
+*.pem
+*.secret
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,3 +36,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Documentation with sensitive data
+docs/FINAL_IMPLEMENTATION_SUMMARY.md
+docs/TEST_AND_DEBUG_REPORT.md
+
