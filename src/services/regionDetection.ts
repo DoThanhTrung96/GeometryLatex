@@ -21,11 +21,7 @@ export async function detectGeometryRegion(
 ): Promise<RegionDetectionResult> {
   try {
     // Dynamically import the appropriate AI service
-    const service = aiProvider === 'gemini' 
-      ? await import('./geminiService')
-      : await import('./perplexityService');
-    
-    // Call the detectRegion function from the AI service
+    const service = await import('./perplexityService');    // Call the detectRegion function from the AI service
     const result = await service.detectRegion(imageBase64, mimeType);
     
     // Validate the result

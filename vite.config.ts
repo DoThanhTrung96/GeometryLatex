@@ -14,7 +14,6 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
         'process.env.PERPLEXITY_API_KEY': JSON.stringify(env.VITE_PERPLEXITY_API_KEY)
       },
       resolve: {

@@ -188,21 +188,62 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
 
     const textPart = {
         text: `
-Analyze the provided image to identify geometric figures. Your task is to extract structural components even if the image quality is not perfect.
+Analyze this geometric diagram image in COMPREHENSIVE DETAIL. Extract ALL visible elements with precise descriptions.
 
-Instructions:
-1.  Look for ANY geometric figures (triangles, circles, polygons, lines, angles, etc.). Be GENEROUS - even hand-drawn or imperfect shapes should be detected.
-2.  If ANY geometric content is found (even partial or unclear):
-    a.  Define a bounding box around the geometric content (normalized 0-100 coordinates).
-    b.  Identify vertices with labels (A, B, C, etc.) and normalized x/y coordinates (0-100 scale).
-    c.  Identify lines/edges connecting vertices, noting style (solid/dashed).
-    d.  Identify annotations: angle markers, measurements, labels, or symbols.
-    e.  Provide a confidence score (0.0 to 1.0). Be LENIENT - use >0.5 for any detectable geometry.
-3.  ONLY set geometryFound=false if there is absolutely NO geometric content visible.
+CRITICAL: Be extremely thorough - capture EVERY text annotation, EVERY visual property, EVERY geometric relationship.
 
-IMPORTANT: This image has already been cropped and enhanced for analysis. Assume geometric content is present unless clearly absent.
+Your analysis must include:
 
-Return your analysis in the specified JSON format.
+1. VERTICES - For each point:
+   - label (A, B, C, D, O, etc.)
+   - x, y coordinates (0-100 normalized)
+   - fillColor (black, red, blue, white, none)
+   - size (small, medium, large, or specific like "3pt")
+   - shape (circle, square, dot, none)
+   - spatialRelation (e.g., "on sphere surface", "center of sphere", "above plane", "on circle")
+   - confidence (0.0-1.0)
+
+2. EDGES/LINES - For each connection:
+   - from, to (vertex labels)
+   - style (solid, dashed, dotted, thick, double)
+   - thickness (very thin, thin, thick, very thick)
+   - color (if not black)
+   - geometricRelation (e.g., "radius", "diameter", "edge of tetrahedron", "tangent", "chord")
+   - isVisible (false for hidden edges in 3D, true by default)
+   - confidence (0.0-1.0)
+
+3. ANNOTATIONS - For ALL text in the image:
+   - type (text, description, label-group, side-label, angle, etc.)
+   - content (short form: "O", "A, B, C, D")
+   - fullText (EXACT text as shown: "Center of sphere", "Vertices A, B, C, D on sphere surface")
+   - position (near which vertex/edge, or "center", "top", etc.)
+   - placement (above, below, left, right, center)
+   - refersTo (array of vertex/edge labels this describes)
+   - textStyle (italic, bold, normal)
+   - fontSize (tiny, small, normal, large)
+   - confidence (0.0-1.0)
+
+4. SHAPES - For circles, spheres, polyhedra:
+   - type (circle, sphere, ellipse, polyhedron, tetrahedron)
+   - center (vertex label)
+   - radius (if measurable or labeled)
+   - vertices (for polyhedra: ["A", "B", "C", "D"])
+   - style (dashed, solid, dotted)
+   - geometricDescription ("circumscribed sphere", "inscribed circle", "regular tetrahedron")
+
+5. GEOMETRIC CONTEXT:
+   - geometricDescription (overall: "Regular tetrahedron ABCD inscribed in sphere with center O")
+   - dimension (2d or 3d)
+   - spatialRelationships (array of statements: ["O is the center of the sphere", "Vertices A, B, C, D lie on the sphere surface"])
+
+6. VISUAL CONTEXT:
+   - emphasisColors (map vertex labels to colors: {"O": "red", "A": "black"})
+   - textAnnotations (all visible text strings)
+   - drawingStyle (geometric, technical, sketch, hand-drawn)
+
+IMPORTANT: This image has been cropped and enhanced. Assume geometric content is present.
+
+Return your analysis in the specified JSON format with ALL these details.
 `
     };
 

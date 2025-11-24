@@ -4,14 +4,13 @@ import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
-// Legacy imports (will be replaced by dynamic imports in new pipeline)
-import * as geminiService from './services/geminiService';
+// Import Perplexity service for LaTeX correction
 import * as perplexityService from './services/perplexityService';
 import { verifyLatex } from './services/latexCompilerService';
 import { getFriendlyErrorMessage } from './services/errorService';
 import type { ProcessingStep, AnalysisSuccessResult, LatexResult, VerificationResult } from './types';
 
-type AIProvider = 'gemini' | 'perplexity';
+type AIProvider = 'perplexity';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
@@ -228,8 +227,6 @@ function App() {
         const { generateLatex: generateLatexCode } = await import('./services/latexGenerator');
         const latexGenResult = await generateLatexCode(
             geometryResult.geometryData,
-            geometryResult.figureType,
-            true,  // Use AI refinement
             aiProvider
         );
         
@@ -245,7 +242,7 @@ function App() {
         // ====================================================================
         let verificationResult: VerificationResult | null = null;
         const MAX_CORRECTION_ATTEMPTS = 2;
-        const aiService = aiProvider === 'perplexity' ? perplexityService : geminiService;
+        const aiService = perplexityService;
 
         for (let attempt = 0; attempt <= MAX_CORRECTION_ATTEMPTS; attempt++) {
             setStep('VERIFYING');
@@ -310,32 +307,9 @@ function App() {
             Upload a geometric diagram, and get its TikZ LaTeX code instantly.
           </p>
           
-          {/* AI Provider Selector */}
-          <div className="mt-6 flex justify-center gap-4">
-            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="aiProvider"
-                value="perplexity"
-                checked={aiProvider === 'perplexity'}
-                onChange={(e) => setAiProvider(e.target.value as AIProvider)}
-                disabled={step !== 'IDLE' && step !== 'READY' && step !== 'DONE' && step !== 'ERROR'}
-                className="cursor-pointer"
-              />
-              <span className="font-medium">Perplexity</span>
-            </label>
-            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="aiProvider"
-                value="gemini"
-                checked={aiProvider === 'gemini'}
-                onChange={(e) => setAiProvider(e.target.value as AIProvider)}
-                disabled={step !== 'IDLE' && step !== 'READY' && step !== 'DONE' && step !== 'ERROR'}
-                className="cursor-pointer"
-              />
-              <span className="font-medium">Gemini</span>
-            </label>
+          {/* AI Provider Info */}
+          <div className="mt-6 flex justify-center">
+            <span className="text-slate-400 text-sm">Powered by Perplexity Sonar Pro</span>
           </div>
         </header>
 
