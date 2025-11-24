@@ -280,6 +280,12 @@ Return ONLY this JSON structure (no markdown, no extra text):
         }
 
         const result = JSON.parse(jsonStr) as AnalysisResult;
+        
+        // 🔍 DETAILED LOGGING: Show full AI response for inspection
+        console.log('=== PERPLEXITY AI RESPONSE (FULL) ===');
+        console.log(JSON.stringify(result, null, 2));
+        console.log('=== END AI RESPONSE ===');
+        
         return result;
 
     } catch (error) {
@@ -293,25 +299,64 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
         throw new Error("Perplexity API key is not configured. Set PERPLEXITY_API_KEY environment variable.");
     }
 
+    const is3D = geometryData.dimension === '3d';
+    const hasShapes = geometryData.shapes && geometryData.shapes.length > 0;
+    
     const prompt = `
-Based on the following JSON data describing a geometric figure, generate a COMPLETE and COMPILABLE LaTeX document using the TikZ package.
+Generate a COMPLETE and COMPILABLE LaTeX document from this ENHANCED geometry data.
 
-JSON Data:
+GEOMETRY DATA:
 \`\`\`json
 ${JSON.stringify(geometryData, null, 2)}
 \`\`\`
 
-**CRITICAL REQUIREMENTS (Failure to follow will result in compilation errors):**
+=== CRITICAL REQUIREMENTS ===
 
-1.  **COMPLETE DOCUMENT:** The output MUST be a full, standalone LaTeX file. It MUST start with \\documentclass{standalone} and MUST contain a \\begin{document} ... \\end{document} environment.
-2.  **REQUIRED PACKAGES:** You MUST include \\usepackage{tikz} and \\usepackage{amsmath} in the preamble.
-3.  **REQUIRED TIKZ LIBRARIES:** You MUST load the necessary TikZ libraries. ALWAYS include \\usetikzlibrary{angles,quotes,calc,arrows.meta,decorations.markings} to handle geometric annotations and calculations. This is not optional and is required to prevent compilation errors.
-4.  **TIKZ ENVIRONMENT:** All drawing commands must be inside a \\begin{tikzpicture} ... \\end{tikzpicture} environment.
-5.  **COORDINATE SCALING:** The provided coordinates are on a 100x100 grid. Scale them for a visually pleasing output (e.g., by a factor of 0.05 to fit a 5x5 area).
-6.  **OUTPUT FORMAT:** The final output must be ONLY the raw LaTeX code. Do NOT include any explanations, comments, or Markdown fences.
-7.  **CODE FORMATTING:** The generated LaTeX code MUST be well-formatted and human-readable. Use proper indentation and ensure commands are on separate lines.
+1. DOCUMENT STRUCTURE (MANDATORY):
+   - Start with: \\documentclass{standalone}
+   - Include: \\usepackage{tikz}, \\usepackage{amsmath}
+   - ${is3D ? 'FOR 3D: \\usepackage{tikz-3dplot}' : ''}
+   - Libraries: \\usetikzlibrary{angles,quotes,calc,arrows.meta,decorations.markings}
+   - Wrap in: \\begin{document} ... \\end{document}
 
-Return ONLY the LaTeX code, no other text.
+2. COORDINATE HANDLING:
+   - Input coords are 0-100 normalized
+   - Transform to TikZ: Divide by 20 (makes 0-5 range)
+   - Example: (87, 52) → (87/20, 52/20) = (4.35, 2.6)
+   - ${is3D ? 'For 3D: Use \\tdplotsetmaincoords{70}{110} before tikzpicture' : ''}
+
+3. USE ALL ENHANCED DATA:
+   - geometricDescription → Add as LaTeX comment at top
+   - spatialRelationships → Add as comments near relevant elements
+   - vertices[].spatialRelation → Use in coordinate comments
+   - vertices[].fillColor, size, shape → Apply to vertex drawing
+   - edges[].color, thickness, geometricRelation → Apply to edge drawing
+   - edges[].geometricRelation: if "geodesic", use curved paths (to[bend left=15])
+   - annotations[].fullText → Use actual text, not just labels
+   - annotations[].placement, textStyle, fontSize → Apply to node positioning
+   - shapes[] → Draw explicitly (circles, spheres as dashed circles)
+
+4. VISUAL QUALITY:
+   - Use colors from edges[].color (blue, red, etc.)
+   - Apply opacity to background elements
+   - Use proper node positioning from annotations[].placement
+   - Add descriptive comments from spatialRelationships[]
+
+5. EXAMPLE VERTEX:
+   If vertex has fillColor="black", size="medium", spatialRelation="on sphere surface":
+   % Vertex A (on sphere surface)
+   \\fill[black] (A) circle (2pt);
+
+6. EXAMPLE EDGE:
+   If edge has color="blue", geometricRelation="edge of tetrahedron":
+   % Edge AB (edge of tetrahedron)
+   \\draw[dashed, thin, blue] (A) to[bend left=15] (B);
+
+7. EXAMPLE ANNOTATION:
+   If annotation has fullText="Center of sphere", placement="below":
+   \\node[below, font=\\large\\itshape] at (O) {Center of sphere};
+
+OUTPUT: Return ONLY the LaTeX code. No markdown fences, no explanations, no extra text.
 `;
 
     try {
