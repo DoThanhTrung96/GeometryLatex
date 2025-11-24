@@ -4,7 +4,7 @@ import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
-import { preprocessImage, cropImage, getValidatedBoundingBox } from './services/imageProcessing';
+// Legacy imports (will be replaced by dynamic imports in new pipeline)
 import * as geminiService from './services/geminiService';
 import * as perplexityService from './services/perplexityService';
 import { verifyLatex } from './services/latexCompilerService';
@@ -58,12 +58,18 @@ const fileToBase64 = (file: File): Promise<string> => {
 function App() {
   const [step, setStep] = useState<ProcessingStep>('IDLE');
   const [error, setError] = useState<string | null>(null);
-  const [isPreprocessing, setIsPreprocessing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisSuccessResult | null>(null);
   const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [aiProvider, setAiProvider] = useState<AIProvider>('perplexity');
+  
+  // Debug: Store intermediate images
+  const [debugImages, setDebugImages] = useState<{
+    original: string | null;
+    cropped: string | null;
+    enhanced: string | null;
+  }>({ original: null, cropped: null, enhanced: null });
 
   const handleFileSelect = useCallback((file: File) => {
     setOriginalFile(file);
@@ -72,6 +78,7 @@ function App() {
     setAnalysisResult(null);
     setLatexResult(null);
     setCroppedImage(null);
+    setDebugImages({ original: null, cropped: null, enhanced: null });
   }, []);
 
   const handleStartAnalysis = useCallback(async () => {
@@ -81,81 +88,214 @@ function App() {
     setAnalysisResult(null);
     setLatexResult(null);
     setCroppedImage(null);
-    setIsPreprocessing(true);
     setStep('READY'); 
 
-    // Select the appropriate AI service based on provider
-    const aiService = aiProvider === 'perplexity' ? perplexityService : geminiService;
-
     try {
-        const base64 = await fileToBase64(originalFile);
-        const preprocessedBase64 = await preprocessImage(base64);
-        setIsPreprocessing(false);
-
+        // NEW PIPELINE ARCHITECTURE - DO NOT REORDER THESE STEPS
+        
+        // Convert file to base64 (original quality, untouched)
+        const originalBase64 = await fileToBase64(originalFile);
+        const mimeType = originalFile.type || 'image/png';
+        
+        // Debug: Store original image
+        setDebugImages(prev => ({ ...prev, original: originalBase64 }));
+        
+        // ====================================================================
+        // PHASE 1: FR-1 - GEOMETRY REGION DETECTION
+        // Send ORIGINAL image to AI for region detection
+        // ====================================================================
+        setStep('DETECTING');
+        console.log('Phase 1: Detecting geometry region in original image...');
+        
+        const { detectGeometryRegion } = await import('./services/regionDetection');
+        const detectionResult = await detectGeometryRegion(originalBase64, mimeType, aiProvider);
+        
+        console.log(`Detection complete: confidence=${detectionResult.confidence}, method=${detectionResult.detectionMethod}`);
+        console.log('Detected bounding box:', JSON.stringify(detectionResult.boundingBox, null, 2));
+        
+        // Get image dimensions for context
+        const imageCropping = await import('./services/imageCropping');
+        const originalDims = await imageCropping.getImageDimensions(originalBase64);
+        console.log(`Original image dimensions: ${originalDims.width}x${originalDims.height}`);
+        
+        if (detectionResult.confidence < 0.6) {
+            console.warn(`⚠️ Low detection confidence, but continuing anyway...`);
+        }
+        
+        // ====================================================================
+        // PHASE 2: FR-2 - LOSSLESS CROPPING
+        // Crop to detected region with padding
+        // ====================================================================
+        setStep('CROPPING');
+        console.log('Phase 2: Cropping to detected region...');
+        
+        const { cropToRegion } = await import('./services/imageCropping');
+        const croppedBase64 = await cropToRegion(
+            originalBase64, 
+            detectionResult.boundingBox, 
+            10  // 10px padding
+        );
+        
+        const croppedDims = await imageCropping.getImageDimensions(croppedBase64);
+        console.log(`Cropping complete: ${croppedDims.width}x${croppedDims.height}`);
+        console.log(`Cropped image size: ${croppedBase64.length} bytes (base64)`);
+        
+        // Debug: Store cropped image
+        setDebugImages(prev => ({ ...prev, cropped: croppedBase64 }));
+        
+        // Sanity check - cropped image should have reasonable dimensions
+        if (croppedDims.width < 50 || croppedDims.height < 50) {
+            console.error('⚠️ Cropped image is too small! May indicate detection failure.');
+            console.error(`Dimensions: ${croppedDims.width}x${croppedDims.height}`);
+        }
+        
+        // ====================================================================
+        // PHASE 3: FR-3 - QUALITY ENHANCEMENT
+        // Multi-stage enhancement pipeline
+        // ====================================================================
+        setStep('ENHANCING');
+        console.log('Phase 3: Enhancing image quality...');
+        
+        const { enhanceImage } = await import('./services/imageEnhancement');
+        const enhancementResult = await enhanceImage(croppedBase64);
+        
+        console.log(`Enhancement complete: filters=${enhancementResult.appliedFilters.join(', ')}`);
+        console.log(`  Contrast: ${enhancementResult.metrics.originalContrast.toFixed(2)} → ${enhancementResult.metrics.enhancedContrast.toFixed(2)}`);
+        console.log(`  Sharpness: ${enhancementResult.metrics.sharpness.toFixed(2)}`);
+        console.log(`  Enhanced image size: ${enhancementResult.enhancedBase64.length} bytes (base64)`);
+        
+        // Debug: Store enhanced image
+        setDebugImages(prev => ({ ...prev, enhanced: enhancementResult.enhancedBase64 }));
+        
+        // Store enhanced cropped image for display
+        setCroppedImage(enhancementResult.enhancedBase64);
+        
+        // ====================================================================
+        // PHASE 4: FR-4 - STRUCTURED GEOMETRY ANALYSIS
+        // AI analyzes enhanced image with structured schema
+        // ====================================================================
         setStep('ANALYZING');
-        const analysis = await aiService.analyzeGeometry(preprocessedBase64, 'image/png');
+        console.log('Phase 4: Analyzing geometry structure...');
         
-        if (!analysis.geometryFound) {
-            throw new Error("No geometric figure could be identified in the image. Please try a clearer image.");
+        const { analyzeGeometry } = await import('./services/geometryAnalysis');
+        
+        // Try with enhanced image first, fallback to cropped if analysis fails
+        let geometryResult;
+        try {
+            console.log('Attempting analysis with enhanced image...');
+            geometryResult = await analyzeGeometry(
+                enhancementResult.enhancedBase64,
+                'image/png',
+                aiProvider
+            );
+        } catch (enhancedError) {
+            console.warn('Enhanced image analysis failed, trying with cropped (unenhanced) image...');
+            console.warn('Error was:', enhancedError);
+            
+            // Fallback to cropped but not enhanced image
+            geometryResult = await analyzeGeometry(
+                croppedBase64,
+                'image/png',
+                aiProvider
+            );
+            console.log('✓ Analysis succeeded with cropped (unenhanced) image');
         }
         
-        setAnalysisResult(analysis);
-
-        const validatedBox = await getValidatedBoundingBox(preprocessedBase64, analysis.boundingBox);
-        const cropped = await cropImage(preprocessedBase64, validatedBox);
-        setCroppedImage(cropped);
-
-        if (analysis.confidenceScore < 0.7) {
-            console.warn(`Low confidence score: ${analysis.confidenceScore}. Results may be inaccurate.`);
+        console.log(`Analysis complete: type=${geometryResult.figureType}, confidence=${geometryResult.overallConfidence.toFixed(2)}`);
+        console.log(`  Vertices: ${geometryResult.geometryData.vertices?.length || 0}`);
+        console.log(`  Edges: ${(geometryResult.geometryData.edges?.length || 0) + (geometryResult.geometryData.lines?.length || 0)}`);
+        
+        if (geometryResult.overallConfidence < 0.7) {
+            console.warn(`Low analysis confidence: ${geometryResult.overallConfidence}. Results may be inaccurate.`);
         }
-
-        // --- Start of Verification and Correction Loop ---
-        let currentLatexCode = '';
+        
+        // Convert to legacy format for display
+        const legacyAnalysis = {
+            geometryFound: true,
+            boundingBox: detectionResult.boundingBox,
+            geometryData: geometryResult.geometryData,
+            confidenceScore: geometryResult.overallConfidence
+        };
+        setAnalysisResult(legacyAnalysis as any);
+        
+        // ====================================================================
+        // PHASE 5: FR-5 - TEMPLATE-DRIVEN LATEX GENERATION
+        // Generate LaTeX with template + AI refinement
+        // ====================================================================
+        setStep('GENERATING');
+        console.log('Phase 5: Generating LaTeX code...');
+        
+        const { generateLatex: generateLatexCode } = await import('./services/latexGenerator');
+        const latexGenResult = await generateLatexCode(
+            geometryResult.geometryData,
+            geometryResult.figureType,
+            true,  // Use AI refinement
+            aiProvider
+        );
+        
+        console.log(`LaTeX generation complete: method=${latexGenResult.generationMethod}`);
+        console.log(`  Lines: ${latexGenResult.codeMetrics.lines}`);
+        console.log(`  Coordinates: ${latexGenResult.codeMetrics.coordinates}`);
+        console.log(`  Edges: ${latexGenResult.codeMetrics.edges}`);
+        
+        let currentLatexCode = latexGenResult.latexCode;
+        
+        // ====================================================================
+        // VERIFICATION & SELF-CORRECTION LOOP
+        // ====================================================================
         let verificationResult: VerificationResult | null = null;
         const MAX_CORRECTION_ATTEMPTS = 2;
-
-        setStep('GENERATING');
-        const initialResult = await aiService.generateLatex(analysis.geometryData);
-        currentLatexCode = initialResult.latexCode;
+        const aiService = aiProvider === 'perplexity' ? perplexityService : geminiService;
 
         for (let attempt = 0; attempt <= MAX_CORRECTION_ATTEMPTS; attempt++) {
             setStep('VERIFYING');
+            console.log(`Verification attempt ${attempt + 1}...`);
+            
             try {
                 verificationResult = await verifyLatex(currentLatexCode);
                 if (verificationResult.success) {
-                    break; // Exit loop if compilation is successful
+                    console.log('✓ LaTeX code compiled successfully');
+                    break;
                 }
             } catch (verifyError) {
                 console.error("Verification service failed:", verifyError);
-                verificationResult = { success: false, log: `The LaTeX verification service could not be reached. Error: ${getFriendlyErrorMessage(verifyError)}` };
+                verificationResult = { 
+                    success: false, 
+                    log: `Verification service error: ${getFriendlyErrorMessage(verifyError)}` 
+                };
             }
 
             if (attempt === MAX_CORRECTION_ATTEMPTS) {
                 const finalLog = verificationResult?.log ? `\n\n--- Final Compilation Log ---\n${verificationResult.log}` : '';
-                throw new Error(`The AI failed to produce compilable LaTeX code after ${MAX_CORRECTION_ATTEMPTS} attempts.${finalLog}`);
+                throw new Error(`Failed to produce compilable LaTeX after ${MAX_CORRECTION_ATTEMPTS} correction attempts.${finalLog}`);
             }
 
             setStep('CORRECTING');
-            const correctedResult = await aiService.fixLatex(currentLatexCode, verificationResult.log || "Unknown compilation error.");
+            console.log(`Correcting LaTeX code (attempt ${attempt + 1})...`);
+            const correctedResult = await aiService.fixLatex(
+                currentLatexCode, 
+                verificationResult.log || "Unknown compilation error."
+            );
             currentLatexCode = correctedResult.latexCode;
         }
         
         if (!verificationResult?.success) {
-             throw new Error("Failed to produce compilable LaTeX code after multiple correction attempts.");
+             throw new Error("Failed to produce compilable LaTeX code.");
         }
         
         setLatexResult({ latexCode: currentLatexCode });
         setStep('DONE');
+        console.log('✓ Pipeline complete!');
+        
     } catch (err) {
-        setIsPreprocessing(false);
         const friendlyMessage = getFriendlyErrorMessage(err);
         setError(friendlyMessage);
         setStep('ERROR');
     }
   }, [originalFile, aiProvider]);
 
-  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING' || step === 'CORRECTING';
-  const isProcessing = isApiProcessing || isPreprocessing;
+  const isApiProcessing = step === 'ANALYZING' || step === 'GENERATING' || step === 'VERIFYING' || step === 'CORRECTING' || step === 'DETECTING' || step === 'CROPPING' || step === 'ENHANCING';
+  const isProcessing = isApiProcessing;
   const showResults = step === 'DONE' && analysisResult && latexResult && croppedImage;
 
   return (
@@ -203,7 +343,6 @@ function App() {
           <ImageUploader 
             onImageUpload={handleFileSelect} 
             disabled={isProcessing}
-            isProcessing={isPreprocessing}
           />
         </div>
 
@@ -256,6 +395,78 @@ function App() {
             <ResultCard title="Generated LaTeX (TikZ)">
               <CodeBlock code={latexResult.latexCode} language="latex" />
             </ResultCard>
+          </div>
+        )}
+        
+        {/* Debug Panel: Show all intermediate images */}
+        {(debugImages.original || debugImages.cropped || debugImages.enhanced) && (
+          <div className="mt-12 border-t border-slate-700 pt-8">
+            <h2 className="text-2xl font-bold text-white mb-6">🔍 Debug: Intermediate Images</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {debugImages.original && (
+                <div className="bg-slate-800 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-white mb-3">1. Original Image</h3>
+                  <img 
+                    src={`data:image/png;base64,${debugImages.original}`} 
+                    alt="Original" 
+                    className="w-full border border-slate-600 rounded"
+                  />
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = `data:image/png;base64,${debugImages.original}`;
+                      link.download = 'debug-original.png';
+                      link.click();
+                    }}
+                    className="mt-3 w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                  >
+                    Download Original
+                  </button>
+                </div>
+              )}
+              {debugImages.cropped && (
+                <div className="bg-slate-800 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-white mb-3">2. Cropped Image</h3>
+                  <img 
+                    src={`data:image/png;base64,${debugImages.cropped}`} 
+                    alt="Cropped" 
+                    className="w-full border border-slate-600 rounded"
+                  />
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = `data:image/png;base64,${debugImages.cropped}`;
+                      link.download = 'debug-cropped.png';
+                      link.click();
+                    }}
+                    className="mt-3 w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                  >
+                    Download Cropped
+                  </button>
+                </div>
+              )}
+              {debugImages.enhanced && (
+                <div className="bg-slate-800 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-white mb-3">3. Enhanced Image</h3>
+                  <img 
+                    src={`data:image/png;base64,${debugImages.enhanced}`} 
+                    alt="Enhanced" 
+                    className="w-full border border-slate-600 rounded"
+                  />
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = `data:image/png;base64,${debugImages.enhanced}`;
+                      link.download = 'debug-enhanced.png';
+                      link.click();
+                    }}
+                    className="mt-3 w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                  >
+                    Download Enhanced
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

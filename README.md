@@ -1,124 +1,103 @@
-# GeoLaTeX Agent
+# GeoLaTeX - Geometry to LaTeX Converter
 
-An intelligent web application that converts images of geometric diagrams into compilable LaTeX code using the TikZ library. Powered by Google Gemini API with advanced self-correction capabilities.
+**Version 2.0** - New Architecture with AI-First Pipeline
 
-## Features
+An intelligent web application that converts images of geometric diagrams into compilable TikZ LaTeX code using advanced AI vision models.
 
-- 🖼️ **Image Upload**: Drag & drop or select geometric diagram images
-- 🤖 **AI Analysis**: Google Gemini 2.5 Pro analyzes geometry structure
-- 📝 **LaTeX Generation**: Automatic TikZ code generation
-- ✅ **Self-Correction**: Validates and debugs generated LaTeX code
-- 🎨 **Modern UI**: Clean interface with Tailwind CSS
-- 📊 **Confidence Score**: AI confidence rating for analysis quality
+## 🌟 Features
 
-## Quick Start
+- 🎯 **AI Region Detection**: Automatically detects geometry boundaries on original images
+- ✂️ **Lossless Cropping**: Pixel-perfect extraction with configurable padding
+- ⚡ **Quality Enhancement**: Multi-stage adaptive image optimization (CLAHE, bilateral filter, sharpness)
+- 🤖 **Structured AI Analysis**: JSON schema-based geometry extraction (Gemini 2.5 Pro / Perplexity Sonar Pro)
+- 📐 **Template-Driven LaTeX**: Reliable TikZ generation with AI refinement
+- ✅ **Self-Correction**: External compiler validation with automatic debugging
+- 🔍 **Debug Mode**: Visual comparison of intermediate processing steps
+- 🎨 **Modern UI**: React 19 with Tailwind CSS
+
+## ⚡ Quick Start
 
 ### Prerequisites
-
-- Node.js (v18 or higher)
-- Google Gemini API key
+- Node.js v18+
+- Perplexity API key (or Gemini API key)
 
 ### Installation
-
 ```bash
-# Install dependencies
 npm install
-
-# Set up environment variables
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
-
-# Start development server
-npm run dev
+# Edit .env: Add VITE_PERPLEXITY_API_KEY or VITE_GEMINI_API_KEY
+npm run dev  # → http://localhost:3000
 ```
 
-The application will be available at `http://localhost:3000`
-
-### Build for Production
-
+### Production Build
 ```bash
-npm run build
-npm run preview
+npm run build && npm run preview
 ```
 
-## Project Structure
+## 🏗️ Architecture
+
+**New 8-Step Pipeline** (v2.0):
+```
+Upload → AI Detect → Lossless Crop → Enhance → Structured Analysis → Template LaTeX → Verify → Self-Correct
+```
+
+**Key Improvement**: AI detection on **ORIGINAL** untouched images (not preprocessed) ensures accurate region detection.
+
+## 📁 Project Structure
 
 ```
 GeometryLatex/
-├── src/                      # Source code
-│   ├── App.tsx              # Main application component
-│   ├── index.tsx            # Entry point
-│   ├── types.ts             # TypeScript type definitions
-│   ├── components/          # React components
-│   │   ├── CodeBlock.tsx
-│   │   ├── icons.tsx
-│   │   ├── ImageUploader.tsx
-│   │   ├── ResultCard.tsx
-│   │   └── StepDisplay.tsx
-│   └── services/            # Business logic
-│       ├── errorService.ts
-│       ├── geminiService.ts
-│       ├── imageProcessing.ts
-│       └── latexCompilerService.ts
-├── public/                  # Static assets
-│   └── images/             # Test images
-├── docs/                   # Documentation
-├── dist/                   # Build output
-└── index.html             # HTML entry point
+├── src/
+│   ├── App.tsx                      # Main orchestrator (8-step pipeline)
+│   ├── types.ts                     # Type definitions (single source of truth)
+│   ├── components/                  # UI components
+│   └── services/
+│       ├── regionDetection.ts       # FR-1: AI region detection
+│       ├── imageCropping.ts         # FR-2: Lossless cropping
+│       ├── imageEnhancement.ts      # FR-3: Quality enhancement
+│       ├── geometryAnalysis.ts      # FR-4: Structured analysis
+│       ├── latexTemplates.ts        # FR-5: Template system
+│       ├── latexGenerator.ts        # FR-5: LaTeX generation
+│       ├── geminiService.ts         # Gemini API integration
+│       ├── perplexityService.ts     # Perplexity API integration
+│       └── latexCompilerService.ts  # External compiler validation
+├── docs/
+│   └── README.md                    # Complete documentation (requirements, status, architecture)
+├── scripts/
+│   └── PIPELINE_VERIFICATION.js     # Logic verification script
+└── public/images/                   # Test images
 ```
 
-## How It Works
+## 🚀 How It Works
 
-## How It Works
+### Pipeline Flow
+1. **DETECTING** - AI identifies geometry region on original image
+2. **CROPPING** - Lossless extraction with padding
+3. **ENHANCING** - Adaptive multi-stage optimization
+4. **ANALYZING** - Structured JSON extraction (vertices, edges, angles)
+5. **GENERATING** - Template-based TikZ with AI refinement
+6. **VERIFYING** - External compiler validation
+7. **CORRECTING** - AI self-debugging (if needed)
+8. **DONE** - Display results with debug images
 
-1. **Image Upload & Preprocessing**
-   - Upload geometric diagram image
-   - Intelligent border detection and cropping
-   - Adaptive grayscale conversion and binarization
+### Tech Stack
+- **Frontend**: React 19 + TypeScript + Vite 6
+- **AI**: Perplexity Sonar Pro / Gemini 2.5 Pro
+- **Styling**: Tailwind CSS
+- **Image**: HTML5 Canvas API (CLAHE, bilateral filter, unsharp mask)
+- **LaTeX**: External compiler (rtex.probablya.dev)
 
-2. **AI Geometry Analysis**
-   - Gemini 2.5 Pro analyzes the image
-   - Extracts vertices, lines, and annotations
-   - Returns structured JSON with bounding box and confidence score
+## 📖 Documentation
 
-3. **LaTeX Code Generation**
-   - Gemini 2.5 Pro generates complete TikZ document
-   - Includes all necessary packages and libraries
-   - Properly formatted and human-readable
+**Complete docs**: [`docs/README.md`](docs/README.md)
+- Full requirements specification (FR-1 to FR-5)
+- Implementation status & checklist
+- Architecture details & pipeline verification
+- Test cases & acceptance criteria
 
-4. **Verification & Self-Correction**
-   - Code sent to external LaTeX compiler
-   - If errors occur, AI debugs and rewrites code
-   - Repeats until successful compilation (up to 2 attempts)
+**Quick debug**: `node scripts/PIPELINE_VERIFICATION.js`
 
-5. **Display Results**
-   - Shows isolated geometric figure
-   - Displays confidence score
-   - Provides copyable LaTeX code
-
-## Technologies
-
-- **Frontend**: React 19.2 with TypeScript
-- **Build Tool**: Vite 6.2
-- **AI**: Google Gemini API (@google/genai 1.27)
-- **Styling**: Tailwind CSS (via CDN)
-- **Image Processing**: HTML5 Canvas API
-- **LaTeX Verification**: External compilation service
-
-## Development
-
-```bash
-# Start dev server with hot reload
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-```
-
-## Environment Variables
+## ⚙️ Environment Variables
 
 Create a `.env` file in the root directory:
 

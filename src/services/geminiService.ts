@@ -1,9 +1,105 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import type { AnalysisResult, GeometryData, LatexResult } from '../types';
+import type { AnalysisResult, GeometryData, LatexResult, RegionDetectionResult, GeometryAnalysisResult } from '../types';
 
 // According to guidelines, API key must be from process.env.API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+
+// ============================================================================
+// FR-1: REGION DETECTION
+// ============================================================================
+
+/**
+ * Detects geometry region in ORIGINAL untouched image.
+ * Returns bounding box with confidence score.
+ */
+export const detectRegion = async (imageBase64: string, mimeType: string): Promise<RegionDetectionResult> => {
+  const model = 'gemini-2.0-flash-exp';
+
+  const imagePart = {
+    inlineData: {
+      data: imageBase64,
+      mimeType: mimeType,
+    },
+  };
+
+  const textPart = {
+    text: `
+Analyze this image and identify the EXACT region containing the geometric figure.
+
+TASK: Find the bounding box that tightly encompasses ALL geometric content, including:
+- All vertices and lines
+- All labels and annotations
+- All angle markers and measurements
+- EXCLUDE: Document borders, background, watermarks, unrelated text
+
+COORDINATE SYSTEM:
+- Top-left corner of image = (0, 0)
+- X increases right
+- Y increases down
+- Provide pixel coordinates (integers)
+
+CRITICAL: Analyze the ORIGINAL image quality. Do not assume preprocessing.
+
+Return ONLY a JSON object with this structure:
+{
+  "boundingBox": {
+    "x": <number>,
+    "y": <number>,
+    "width": <number>,
+    "height": <number>
+  },
+  "confidence": <number 0-1>,
+  "detectionMethod": "ai-vision"
+}
+
+Confidence scoring:
+- 1.0: Perfect clarity, unambiguous geometry
+- 0.9: Very clear, minor edge uncertainty  
+- 0.8: Clear but some background noise
+- 0.7: Detectable but challenging
+- <0.7: Poor quality or ambiguous
+`
+  };
+
+  const regionSchema = {
+    type: Type.OBJECT,
+    properties: {
+      boundingBox: {
+        type: Type.OBJECT,
+        properties: {
+          x: { type: Type.INTEGER },
+          y: { type: Type.INTEGER },
+          width: { type: Type.INTEGER },
+          height: { type: Type.INTEGER },
+        },
+        required: ['x', 'y', 'width', 'height']
+      },
+      confidence: { type: Type.NUMBER },
+      detectionMethod: { type: Type.STRING }
+    },
+    required: ['boundingBox', 'confidence', 'detectionMethod']
+  };
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [{ parts: [imagePart, textPart] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: regionSchema,
+      },
+    });
+
+    const jsonText = response.text;
+    const result = JSON.parse(jsonText) as RegionDetectionResult;
+    return result;
+
+  } catch (error) {
+    console.error("Error detecting region with Gemini:", error);
+    throw new Error("Gemini failed to detect geometry region.");
+  }
+};
 
 const geometryDataSchema = {
     type: Type.OBJECT,
@@ -92,17 +188,19 @@ export const analyzeGeometry = async (imageBase64: string, mimeType: string): Pr
 
     const textPart = {
         text: `
-Analyze the provided image to identify the main geometric figure. Your task is to extract its structural components and metadata.
+Analyze the provided image to identify geometric figures. Your task is to extract structural components even if the image quality is not perfect.
 
 Instructions:
-1.  Determine if a clear geometric figure (e.g., triangle, circle with annotations, intersecting lines) is present.
-2.  If a figure is found:
-    a.  Define a tight bounding box around the entire geometric figure, including all labels and annotations.
-    b.  Identify all vertices, assigning a capital letter label and normalized (0-100) x/y coordinates relative to the bounding box.
-    c.  Identify all lines connecting the vertices, noting their style (solid or dashed).
-    d.  Identify all annotations, such as angle markers, side length labels, or relationship indicators (e.g., perpendicularity marks).
-    e.  Provide a confidence score (0.0 to 1.0) for your analysis. A high score (>0.9) means you are very certain. A low score (<0.7) suggests ambiguity.
-3.  If no clear geometric figure can be identified, simply indicate that geometry was not found.
+1.  Look for ANY geometric figures (triangles, circles, polygons, lines, angles, etc.). Be GENEROUS - even hand-drawn or imperfect shapes should be detected.
+2.  If ANY geometric content is found (even partial or unclear):
+    a.  Define a bounding box around the geometric content (normalized 0-100 coordinates).
+    b.  Identify vertices with labels (A, B, C, etc.) and normalized x/y coordinates (0-100 scale).
+    c.  Identify lines/edges connecting vertices, noting style (solid/dashed).
+    d.  Identify annotations: angle markers, measurements, labels, or symbols.
+    e.  Provide a confidence score (0.0 to 1.0). Be LENIENT - use >0.5 for any detectable geometry.
+3.  ONLY set geometryFound=false if there is absolutely NO geometric content visible.
+
+IMPORTANT: This image has already been cropped and enhanced for analysis. Assume geometric content is present unless clearly absent.
 
 Return your analysis in the specified JSON format.
 `

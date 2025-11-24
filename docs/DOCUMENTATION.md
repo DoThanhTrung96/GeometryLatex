@@ -1,8 +1,61 @@
 # GeoLaTeX Agent - Complete Documentation
 
-**Project Version:** 1.0  
-**Last Updated:** November 22, 2025  
-**Status:** ✅ Production Ready
+**Project Version:** 2.0 (NEW ARCHITECTURE)  
+**Last Updated:** January 2025  
+**Status:** ⚠️ ARCHITECTURE CHANGED - READ MIGRATION NOTES BELOW
+
+---
+
+## ⚠️ MIGRATION NOTICE - NEW ARCHITECTURE
+
+**This documentation describes the OLD architecture and is DEPRECATED.**
+
+The GeoLaTeX system has been completely redesigned with a new 8-step pipeline that delivers significantly better results. **The information in sections below about "Border Detection" and "Preprocessing" is NO LONGER ACCURATE.**
+
+### What Changed?
+
+**OLD PIPELINE (INCORRECT - DO NOT USE):**
+```
+Upload → Border Removal → Grayscale → Binarize → AI Analysis → LaTeX Generation
+```
+❌ **Problem:** Preprocessing destroyed image quality BEFORE AI detection
+
+**NEW PIPELINE (CURRENT IMPLEMENTATION):**
+```
+Upload (original) → AI Region Detection → Lossless Crop → Multi-Stage Enhancement → Structured Analysis → Template-Driven LaTeX → Verification Loop
+```
+✅ **Solution:** AI sees original quality, targeted enhancement only after detection
+
+### For Complete New Architecture Documentation:
+
+**Read:** `REQUIREMENTS.md` in project root - Contains complete specification of FR-1 through FR-5
+
+**Read:** `.github/copilot-instructions.md` - Contains implementation guidelines and architecture details
+
+### Key Changes:
+
+1. **FR-1:** AI detects geometry region on ORIGINAL untouched image
+2. **FR-2:** Lossless pixel-perfect cropping to detected region
+3. **FR-3:** Multi-stage enhancement (CLAHE, bilateral filter, sharpness, resolution optimization)
+4. **FR-4:** Structured JSON schema for consistent AI geometry analysis
+5. **FR-5:** Template-driven LaTeX generation with AI refinement
+
+### Migration Path for Developers:
+
+1. Read `REQUIREMENTS.md` sections 2.1-2.5 for detailed specs
+2. Review `src/App.tsx` `handleStartAnalysis()` function (lines 77-246) for complete pipeline implementation
+3. Study new service files in `src/services/`:
+   - `regionDetection.ts` (FR-1)
+   - `imageCropping.ts` (FR-2)
+   - `imageEnhancement.ts` (FR-3)
+   - `geometryAnalysis.ts` (FR-4)
+   - `latexTemplates.ts` + `latexGenerator.ts` (FR-5)
+
+---
+
+## ⚠️ LEGACY DOCUMENTATION BELOW (OUTDATED)
+
+**Everything below this line describes the OLD ARCHITECTURE and may be incorrect.**
 
 ---
 

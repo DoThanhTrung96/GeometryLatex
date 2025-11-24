@@ -8,6 +8,9 @@ interface StepDisplayProps {
 }
 
 const steps = [
+  { id: 'DETECTING', name: 'Detecting Region', icon: <VerifyIcon /> },
+  { id: 'CROPPING', name: 'Cropping Image', icon: <AnalyzeIcon /> },
+  { id: 'ENHANCING', name: 'Enhancing Quality', icon: <ShieldCheckIcon /> },
   { id: 'ANALYZING', name: 'Analyzing Geometry', icon: <VerifyIcon /> },
   { id: 'GENERATING', name: 'Generating Code', icon: <AnalyzeIcon /> },
   { id: 'VERIFYING', name: 'Verifying Code', icon: <ShieldCheckIcon /> },
