@@ -1,10 +1,9 @@
 // FR-5: LaTeX Generation Service
-// Two-stage generation: Template filling + AI refinement
+// Two-stage generation: Coordinate transformation + AI styling
 
 import type { GeometryData, LatexGenerationResult, CodeMetrics } from '../types';
 import { selectTemplate, fillTemplate, validateLatexCode } from './latexTemplates';
-
-
+import { transformGeometryData } from './coordinateTransform';
 
 /**
  * Calculates metrics about the generated code
@@ -30,16 +29,34 @@ function calculateCodeMetrics(latexCode: string): CodeMetrics {
 }
 
 /**
- * Generates LaTeX code purely from AI without templates (fallback)
+ * Generates LaTeX code with pre-transformed coordinates
+ * 
+ * Process:
+ * 1. Transform image coordinates to TikZ coordinates (Y-inversion, scaling)
+ * 2. Calculate sphere/shape dimensions from vertex positions
+ * 3. Send transformed data to AI for styling and code generation
  */
 export async function generateLatex(
   geometryData: GeometryData,
   aiProvider: 'perplexity' = 'perplexity'
 ): Promise<LatexGenerationResult> {
   try {
-    const service = await import('./perplexityService');
+    // Step 1: Transform coordinates (Y-inversion, scaling)
+    console.log('Transforming coordinates for TikZ...');
+    const transformedData = transformGeometryData(geometryData, {
+      scale: 20,
+      invertY: true,
+      maxCoord: 100,
+      precision: 2
+    });
     
-    const result = await service.generateLatex(geometryData);
+    console.log('Transformed vertices:', transformedData.vertices.map(v => 
+      `${v.label}: (${v.x}, ${v.y})`
+    ).join(', '));
+    
+    // Step 2: Send to AI for styling
+    const service = await import('./perplexityService');
+    const result = await service.generateLatex(transformedData);
     const metrics = calculateCodeMetrics(result.latexCode);
     
     return {
@@ -51,7 +68,7 @@ export async function generateLatex(
     };
     
   } catch (error) {
-    console.error('AI-only generation failed:', error);
-    throw new Error(`AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error('LaTeX generation failed:', error);
+    throw new Error(`LaTeX generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

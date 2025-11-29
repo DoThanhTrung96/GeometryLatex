@@ -299,64 +299,83 @@ export const generateLatex = async (geometryData: GeometryData): Promise<LatexRe
         throw new Error("Perplexity API key is not configured. Set PERPLEXITY_API_KEY environment variable.");
     }
 
-    const is3D = geometryData.dimension === '3d';
-    const hasShapes = geometryData.shapes && geometryData.shapes.length > 0;
+    // Check if coordinates are pre-transformed
+    const isTransformed = (geometryData as any)._coordinatesTransformed === true;
+    
+    // Extract sphere dimensions if calculated
+    const sphereShape = geometryData.shapes?.find(s => s.type === 'sphere') as any;
+    const sphereRx = sphereShape?._ellipseRx || 2.5;
+    const sphereRy = sphereShape?._ellipseRy || 2.5;
+    const sphereRadius = sphereShape?.radius || '2.5';
     
     const prompt = `
-Generate a COMPLETE and COMPILABLE LaTeX document from this ENHANCED geometry data.
+Generate a COMPLETE and COMPILABLE LaTeX document from this geometry data.
 
 GEOMETRY DATA:
 \`\`\`json
 ${JSON.stringify(geometryData, null, 2)}
 \`\`\`
 
-=== CRITICAL REQUIREMENTS ===
+=== CRITICAL: COORDINATES ARE PRE-TRANSFORMED ===
+${isTransformed ? `
+✅ Coordinates have ALREADY been transformed to TikZ format!
+✅ Y-axis has been INVERTED (image Y-down → TikZ Y-up)
+✅ Values are ALREADY SCALED (divided by 20)
+✅ USE THE VERTEX COORDINATES EXACTLY AS PROVIDED - DO NOT MODIFY THEM!
 
-1. DOCUMENT STRUCTURE (MANDATORY):
-   - Start with: \\documentclass{standalone}
-   - Include: \\usepackage{tikz}, \\usepackage{amsmath}
-   - ${is3D ? 'FOR 3D: \\usepackage{tikz-3dplot}' : ''}
-   - Libraries: \\usetikzlibrary{angles,quotes,calc,arrows.meta,decorations.markings}
-   - Wrap in: \\begin{document} ... \\end{document}
+Example: If vertex A has x=4.6, y=2.3, use exactly:
+  \\coordinate (A) at (4.6, 2.3);
+` : `
+⚠️ Coordinates are in image format (0-100, Y-down)
+Transform: x_tikz = x/20, y_tikz = (100-y)/20
+`}
 
-2. COORDINATE HANDLING:
-   - Input coords are 0-100 normalized
-   - Transform to TikZ: Divide by 20 (makes 0-5 range)
-   - Example: (87, 52) → (87/20, 52/20) = (4.35, 2.6)
-   - ${is3D ? 'For 3D: Use \\tdplotsetmaincoords{70}{110} before tikzpicture' : ''}
+=== SPHERE DIMENSIONS (PRE-CALCULATED) ===
+${sphereShape ? `
+Sphere center: ${sphereShape.center || 'O'}
+Ellipse horizontal radius: ${sphereRx} cm
+Ellipse vertical radius: ${sphereRy} cm
+Use these EXACT dimensions for the sphere ellipse.
+` : 'No sphere detected.'}
 
-3. USE ALL ENHANCED DATA:
-   - geometricDescription → Add as LaTeX comment at top
-   - spatialRelationships → Add as comments near relevant elements
-   - vertices[].spatialRelation → Use in coordinate comments
-   - vertices[].fillColor, size, shape → Apply to vertex drawing
-   - edges[].color, thickness, geometricRelation → Apply to edge drawing
-   - edges[].geometricRelation: if "geodesic", use curved paths (to[bend left=15])
-   - annotations[].fullText → Use actual text, not just labels
-   - annotations[].placement, textStyle, fontSize → Apply to node positioning
-   - shapes[] → Draw explicitly (circles, spheres as dashed circles)
+=== DOCUMENT STRUCTURE (MANDATORY) ===
+\\documentclass{standalone}
+\\usepackage{tikz}
+\\usepackage{amsmath}
+\\usetikzlibrary{angles,quotes,calc,arrows.meta,decorations.markings}
 
-4. VISUAL QUALITY:
-   - Use colors from edges[].color (blue, red, etc.)
-   - Apply opacity to background elements
-   - Use proper node positioning from annotations[].placement
-   - Add descriptive comments from spatialRelationships[]
+\\begin{document}
+\\begin{tikzpicture}[scale=1.2]
+  % ... drawing commands ...
+\\end{tikzpicture}
+\\end{document}
 
-5. EXAMPLE VERTEX:
-   If vertex has fillColor="black", size="medium", spatialRelation="on sphere surface":
-   % Vertex A (on sphere surface)
+=== DRAWING INSTRUCTIONS ===
+
+1. COORDINATES - Use vertex values EXACTLY as given:
+   \\coordinate (A) at (x, y);  % spatialRelation as comment
+
+2. SPHERE - Draw with pre-calculated dimensions:
+   \\shade[ball color=orange!70, opacity=0.6] (${sphereShape?.center || 'O'}) ellipse (${sphereRx}cm and ${sphereRy}cm);
+   \\draw[orange!80!brown, opacity=0.7, line width=0.8pt] (${sphereShape?.center || 'O'}) ellipse (${sphereRx}cm and ${sphereRy}cm);
+
+3. EDGES - Use exact colors from data:
+   - If color="red": \\draw[dashed, thin, red] (A) to[bend left=12] (B);
+   - If color="blue": \\draw[dashed, thin, blue] (A) to[bend left=15] (C);
+   - Use "to[bend left=12]" for curved spherical edges
+
+4. VERTICES - Draw as filled circles:
    \\fill[black] (A) circle (2pt);
 
-6. EXAMPLE EDGE:
-   If edge has color="blue", geometricRelation="edge of tetrahedron":
-   % Edge AB (edge of tetrahedron)
-   \\draw[dashed, thin, blue] (A) to[bend left=15] (B);
+5. LABELS - Use placement from annotations:
+   - placement="above" → \\node[above=3pt, font=\\large\\itshape] at (D) {D};
+   - placement="below" → \\node[below=3pt, font=\\large\\itshape] at (B) {B};
+   - placement="left" → \\node[left=3pt, font=\\large\\itshape] at (C) {C};
+   - placement="right" → \\node[right=3pt, font=\\large\\itshape] at (A) {A};
 
-7. EXAMPLE ANNOTATION:
-   If annotation has fullText="Center of sphere", placement="below":
-   \\node[below, font=\\large\\itshape] at (O) {Center of sphere};
+6. ADD COMMENTS from geometricDescription and spatialRelationships
 
-OUTPUT: Return ONLY the LaTeX code. No markdown fences, no explanations, no extra text.
+OUTPUT: Return ONLY the raw LaTeX code. No markdown, no explanations.
 `;
 
     try {
