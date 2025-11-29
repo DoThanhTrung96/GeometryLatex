@@ -66,8 +66,11 @@ export interface Edge {
   thickness?: string;          // e.g., 'very thin', 'thin', 'thick', 'very thick', '0.5pt'
   color?: string;              // e.g., 'black', 'blue', 'red'
   opacity?: number;            // 0.0 to 1.0
-  geometricRelation?: string;  // e.g., 'radius', 'diameter', 'edge of tetrahedron', 'tangent'
+  geometricRelation?: string;  // e.g., 'radius', 'diameter', 'edge of tetrahedron face', 'diagonal', 'tangent'
   isVisible?: boolean;         // For hidden edges in 3D (default true)
+  // Curve properties - CRITICAL for proper rendering
+  curveDirection?: 'convex' | 'concave' | 'straight';  // convex=outward curve, concave=inward curve
+  curvature?: number;          // 0.0-1.0 scale: 0=straight, 0.3=slight, 0.5=moderate, 1.0=maximum
 }
 
 export interface Angle {
