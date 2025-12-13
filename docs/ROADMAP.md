@@ -77,6 +77,135 @@ endpoint: 'https://api.anthropic.com/v1/messages'
 
 ---
 
+### Option 2B: Open Source Vision Models ⭐⭐⭐⭐ 
+**Best for cost-sensitive or privacy-focused use cases**
+
+#### **LLaVA 1.6 (Large Language and Vision Assistant)** ⭐ RECOMMENDED OPEN SOURCE
+**Most practical open source option**
+
+**Advantages:**
+- Strong vision-language understanding
+- Good at geometric reasoning
+- Multiple size variants (7B, 13B, 34B parameters)
+- Can run locally or via hosted APIs
+- **FREE** for unlimited use
+
+**Disadvantages:**
+- Lower accuracy than GPT-4 (~70-80% expected vs 85%)
+- Requires GPU for local deployment
+- More complex setup
+
+**Deployment Options:**
+
+1. **Local Deployment** (FREE, Private):
+   ```bash
+   # Requires: NVIDIA GPU with 16GB+ VRAM for 13B model
+   pip install llava
+   # Use Ollama for easy local serving
+   ollama run llava:13b
+   ```
+   - **Cost:** $0 (one-time GPU hardware or cloud rental)
+   - **Privacy:** Complete data control
+   - **Speed:** Fast after initial setup
+
+2. **Hosted API** (Cheap, Easy):
+   - **Replicate.com**: ~$0.001-0.005 per image
+   - **Together.ai**: ~$0.0008 per image  
+   - **Hugging Face Inference**: ~$0.001 per image
+   - **Cost:** 10-30× cheaper than GPT-4
+   - **Setup:** 15 minutes, just API key
+
+**Implementation:**
+```typescript
+// Option A: Local via Ollama
+endpoint: 'http://localhost:11434/api/generate'
+model: 'llava:13b'
+
+// Option B: Replicate
+endpoint: 'https://api.replicate.com/v1/predictions'
+model: 'yorickvp/llava-13b'
+
+// Option C: Together.ai
+endpoint: 'https://api.together.xyz/inference'
+model: 'llava-hf/llava-v1.6-mistral-7b-hf'
+```
+
+**Time:** ~1-2 hours implementation  
+**Expected Improvement:** 60% → 70-80% accuracy  
+**Best for:** Personal projects, high-volume with budget constraints
+
+---
+
+#### **Qwen-VL (Alibaba)** ⭐⭐⭐⭐
+**Strongest open source alternative for technical diagrams**
+
+**Advantages:**
+- Excellent at mathematical and technical content
+- Strong OCR capabilities for labels/annotations
+- Multiple sizes (7B, 72B parameters)
+- Good instruction following
+
+**Deployment:**
+- Local: Requires 16GB+ VRAM for 7B, 80GB+ for 72B
+- Hosted: Available on Together.ai (~$0.001/image)
+
+**Expected Accuracy:** 75-85% (comparable to GPT-4 for technical diagrams)
+
+---
+
+#### **CogVLM** ⭐⭐⭐
+**Good balance of performance and efficiency**
+
+**Advantages:**
+- Efficient architecture
+- Good spatial reasoning
+- Can run on consumer GPUs
+
+**Deployment:**
+- Local: 12GB+ VRAM
+- Hosted: Replicate.com (~$0.002/image)
+
+**Expected Accuracy:** 70-75%
+
+---
+
+#### **Comparison: Open Source vs Commercial**
+
+| Model | Accuracy | Cost/Image | Setup Time | Best Use Case |
+|-------|----------|-----------|------------|---------------|
+| **LLaVA 1.6** (hosted) | 70-80% | $0.001 | 1 hour | Budget-conscious, high volume |
+| **LLaVA 1.6** (local) | 70-80% | $0 | 2-3 hours | Privacy, unlimited use |
+| **Qwen-VL** (hosted) | 75-85% | $0.001 | 1 hour | Technical diagrams |
+| **GPT-4 Vision** | 85% | $0.02 | 30 min | Quick accuracy boost |
+| **Claude 3.5** | 90% | $0.015 | 30 min | Maximum accuracy |
+| **Mathpix** | 90-95% | $0.01 | 1 hour | Production geometry |
+
+---
+
+#### **Recommended Open Source Path:**
+
+**Phase 1: Test with Hosted LLaVA** (1 hour)
+```typescript
+// Create src/services/llavaService.ts
+// Use Together.ai or Replicate for easy testing
+// Same interface as other providers
+```
+
+**Phase 2: Compare Results** (30 min)
+- Test LLaVA vs Perplexity on test.jpg
+- Measure accuracy improvement
+- Calculate cost savings
+
+**Phase 3A: If accuracy sufficient (70-80%):**
+- Deploy locally for $0 cost (if have GPU)
+- Or use hosted API for ~$1/month (1000 images)
+
+**Phase 3B: If need higher accuracy:**
+- Add GPT-4 as fallback for low-confidence cases
+- Hybrid: LLaVA primary + GPT-4 fallback = ~$0.005/image average
+
+---
+
 ### Option 3: Mathpix ⭐⭐⭐⭐⭐
 **Purpose-built solution - BEST for production**
 
@@ -224,11 +353,59 @@ Run in parallel:
 
 ## 🎯 Recommended Action Plan
 
-### **Immediate (This Week):**
+### **Path A: Commercial (Fast, High Accuracy)** ⭐ Recommended if budget allows
+
+#### **Immediate (This Week):**
 1. ✅ **Add GPT-4 Vision** (30 min)
    - Quick win, significant improvement
    - Test side-by-side with Perplexity
    - Compare accuracy on test cases
+
+---
+
+### **Path B: Open Source (Low Cost, Privacy)** ⭐ Recommended for budget/privacy
+
+#### **Immediate (This Week):**
+1. ✅ **Test LLaVA via Hosted API** (1 hour)
+   - Sign up for Together.ai or Replicate ($5 free credit)
+   - Create `src/services/llavaService.ts`
+   - Test on test.jpg and compare with Perplexity
+   - **Cost:** ~$0.001/image (200× cheaper than GPT-4)
+   - **Expected:** 70-80% accuracy
+
+2. ✅ **Evaluate Results** (30 min)
+   - If 70-80% sufficient → Deploy permanently
+   - If need higher accuracy → Add GPT-4 fallback for edge cases
+
+#### **Optional: Local Deployment** (If have GPU)
+3. ⏳ **Deploy LLaVA Locally** (2-3 hours)
+   - Install Ollama: `ollama run llava:13b`
+   - Update service to use local endpoint
+   - **Result:** Unlimited FREE usage forever
+
+---
+
+### **Path C: Hybrid (Best ROI)** ⭐⭐⭐ Optimal for most users
+
+#### **Strategy:**
+```
+Primary: LLaVA (hosted) → 80% of cases, $0.001 each
+Fallback: GPT-4 → 20% of cases (low confidence), $0.02 each
+
+Average cost: (0.8 × $0.001) + (0.2 × $0.02) = $0.0048/image
+Accuracy: ~82-85% (better than either alone)
+```
+
+#### **Implementation:**
+1. Add both LLaVA and GPT-4 services (1.5 hours)
+2. Confidence threshold routing (30 min)
+3. A/B testing to optimize threshold (ongoing)
+
+**Result:** 4× cheaper than GPT-4 alone with similar accuracy
+
+---
+
+### **Continued...
 
 ### **Short Term (Next 2 Weeks):**
 2. ✅ **Add Mathpix Integration** (1-2 hours)
@@ -266,22 +443,69 @@ Run in parallel:
 - 60% accuracy
 - Requires manual corrections 40% of time
 
-**Option A: GPT-4 Vision:**
+**Open Source Options:**
+
+**LLaVA (Hosted via Together.ai/Replicate):**
+- ~$0.001 per analysis (200× cheaper than GPT-4)
+- 70-80% accuracy
+- Best for: High volume, budget constraints
+- Setup: 1 hour
+
+**LLaVA (Self-hosted on GPU):**
+- ~$0 per analysis (after GPU cost)
+- 70-80% accuracy  
+- Best for: Privacy, unlimited usage
+- Setup: 2-3 hours, requires GPU
+
+**Commercial Options:**
+
+**GPT-4 Vision:**
 - ~$0.01-0.03 per analysis
 - 85% accuracy
-- 2-6× cost, but 40% fewer manual corrections
+- 2-6× cost vs Perplexity, 20× cost vs LLaVA
+- Best for: Quick accuracy boost
+- Setup: 30 min
 
-**Option B: Mathpix + GPT-4:**
+**Claude 3.5:**
+- ~$0.015 per analysis
+- 90% accuracy
+- Best for: Maximum accuracy
+- Setup: 30 min
+
+**Mathpix + GPT-4:**
 - ~$0.01 per analysis (unlimited Mathpix plan)
 - 90-95% accuracy
-- Best ROI for production use
+- Best for: Production geometry apps
+- Setup: 1-2 hours
 
-**Option C: Ensemble:**
+**Hybrid Options:**
+
+**LLaVA Primary + GPT-4 Fallback:**
+- ~$0.005 per analysis average (80% LLaVA, 20% GPT-4)
+- 82-85% accuracy
+- **Best ROI:** Near GPT-4 quality at 1/4 the cost
+- Setup: 1.5 hours
+
+**Ensemble (GPT-4 + Claude + Gemini):**
 - ~$0.05-0.08 per analysis
 - 95-98% accuracy
 - For zero-error requirements only
+- Setup: 4-5 hours
 
-**Recommendation:** Start with GPT-4, migrate to Mathpix+GPT-4 for production
+---
+
+### **Cost at Scale (1000 images/month):**
+
+| Option | Monthly Cost | Accuracy | Notes |
+|--------|-------------|----------|-------|
+| **Perplexity** (current) | $5-10 | 60% | Baseline |
+| **LLaVA (hosted)** | **$1** | 70-80% | 🏆 Cheapest |
+| **LLaVA (local GPU)** | **$0** | 70-80% | 🏆 Free after setup |
+| **LLaVA + GPT-4 hybrid** | **$5** | 82-85% | 🏆 Best value |
+| **GPT-4 Vision** | $10-30 | 85% | Quick improvement |
+| **Mathpix + GPT-4** | $12-14 | 90-95% | Production ready |
+| **Claude 3.5** | $15 | 90% | High accuracy |
+| **Ensemble** | $50-80 | 95-98% | Mission critical |
 
 ---
 

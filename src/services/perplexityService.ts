@@ -14,8 +14,10 @@ const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
  * TWO-TIER APPROACH:
  * TIER 1 (Always): Safe fixes - deduplication, validation, defaults
  * TIER 2 (Conditional): Structural fixes - only when confidence >= threshold
+ * 
+ * EXPORTED so other AI services (LLaVA, GPT-4, etc.) can reuse this logic.
  */
-function postProcessGeometryData(data: GeometryData): void {
+export function postProcessGeometryData(data: GeometryData): void {
     if (!data.edges || !data.vertices) return;
     
     const vertices = data.vertices;

@@ -17,12 +17,19 @@ import type { RegionDetectionResult } from '../types';
 export async function detectGeometryRegion(
   imageBase64: string,
   mimeType: string,
-  aiProvider: 'gemini' | 'perplexity' = 'gemini'
+  aiProvider: 'gemini' | 'perplexity' | 'llava' = 'llava'
 ): Promise<RegionDetectionResult> {
   try {
     // Dynamically import the appropriate AI service
-    const service = await import('./perplexityService');    // Call the detectRegion function from the AI service
-    const result = await service.detectRegion(imageBase64, mimeType);
+    let service;
+    if (aiProvider === 'llava') {
+      service = await import('./llavaService');
+    } else {
+      service = await import('./perplexityService');
+    }
+    
+    // Call the detectRegion function from the AI service
+    const result = await service.detectGeometryRegion(imageBase64, mimeType);
     
     // Validate the result
     console.log('AI detection result:', JSON.stringify(result, null, 2));

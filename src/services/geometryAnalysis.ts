@@ -17,11 +17,16 @@ import type { GeometryAnalysisResult, GeometryData } from '../types';
 export async function analyzeGeometry(
   enhancedBase64: string,
   mimeType: string,
-  aiProvider: 'perplexity' = 'perplexity'
+  aiProvider: 'perplexity' | 'llava' = 'llava'
 ): Promise<GeometryAnalysisResult> {
   try {
-    // Use Perplexity AI service for enhanced structured output
-    const service = await import('./perplexityService');
+    // Use appropriate AI service
+    let service;
+    if (aiProvider === 'llava') {
+      service = await import('./llavaService');
+    } else {
+      service = await import('./perplexityService');
+    }
     
     // Call the existing analyzeGeometry which should return AnalysisResult
     const result = await service.analyzeGeometry(enhancedBase64, mimeType);

@@ -4,13 +4,14 @@ import { StepDisplay } from './components/StepDisplay';
 import { ResultCard } from './components/ResultCard';
 import { CodeBlock } from './components/CodeBlock';
 import { LogoIcon, RetryIcon, PlayIcon, SpinnerIcon } from './components/icons';
-// Import Perplexity service for LaTeX correction
+// Import AI services
 import * as perplexityService from './services/perplexityService';
+import * as llavaService from './services/llavaService';
 import { verifyLatex } from './services/latexCompilerService';
 import { getFriendlyErrorMessage } from './services/errorService';
 import type { ProcessingStep, AnalysisSuccessResult, LatexResult, VerificationResult } from './types';
 
-type AIProvider = 'perplexity';
+type AIProvider = 'perplexity' | 'llava';
 
 const ConfidenceIndicator = ({ score }: { score: number }) => {
   const percentage = Math.round(score * 100);
@@ -61,7 +62,7 @@ function App() {
   const [latexResult, setLatexResult] = useState<LatexResult | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
-  const [aiProvider, setAiProvider] = useState<AIProvider>('perplexity');
+  const [aiProvider, setAiProvider] = useState<AIProvider>('llava');
   
   // Debug: Store intermediate images
   const [debugImages, setDebugImages] = useState<{
@@ -242,7 +243,7 @@ function App() {
         // ====================================================================
         let verificationResult: VerificationResult | null = null;
         const MAX_CORRECTION_ATTEMPTS = 2;
-        const aiService = perplexityService;
+        const aiService = aiProvider === 'llava' ? llavaService : perplexityService;
 
         for (let attempt = 0; attempt <= MAX_CORRECTION_ATTEMPTS; attempt++) {
             setStep('VERIFYING');
@@ -307,10 +308,39 @@ function App() {
             Upload a geometric diagram, and get its TikZ LaTeX code instantly.
           </p>
           
-          {/* AI Provider Info */}
-          <div className="mt-6 flex justify-center">
-            <span className="text-slate-400 text-sm">Powered by Perplexity Sonar Pro</span>
+          {/* AI Provider Selection */}
+          <div className="mt-6 flex justify-center items-center gap-4">
+            <span className="text-slate-400 text-sm">AI Model:</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAiProvider('llava')}
+                disabled={isProcessing}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  aiProvider === 'llava'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                🏠 LLaVA (Local, Free)
+              </button>
+              <button
+                onClick={() => setAiProvider('perplexity')}
+                disabled={isProcessing}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  aiProvider === 'perplexity'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                ☁️ Perplexity
+              </button>
+            </div>
           </div>
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            {aiProvider === 'llava' 
+              ? '🔒 Private: Runs on your machine via Ollama (no internet required)'
+              : '🌐 Cloud: Uses Perplexity API (requires API key)'}
+          </p>
         </header>
 
         <div className="max-w-xl mx-auto mb-8">
@@ -446,7 +476,11 @@ function App() {
 
       </main>
       <footer className="text-center p-4 text-slate-500 text-sm">
-        <p>Powered by Perplexity AI</p>
+        <p>
+          {aiProvider === 'llava' 
+            ? '🏠 Powered by LLaVA 1.6 (Local, Open Source) via Ollama' 
+            : '☁️ Powered by Perplexity AI'}
+        </p>
       </footer>
     </div>
   );

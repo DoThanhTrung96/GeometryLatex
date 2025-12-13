@@ -38,7 +38,7 @@ function calculateCodeMetrics(latexCode: string): CodeMetrics {
  */
 export async function generateLatex(
   geometryData: GeometryData,
-  aiProvider: 'perplexity' = 'perplexity'
+  aiProvider: 'perplexity' | 'llava' = 'llava'
 ): Promise<LatexGenerationResult> {
   try {
     // Step 1: Transform coordinates (Y-inversion, scaling)
@@ -55,7 +55,12 @@ export async function generateLatex(
     ).join(', '));
     
     // Step 2: Send to AI for styling
-    const service = await import('./perplexityService');
+    let service;
+    if (aiProvider === 'llava') {
+      service = await import('./llavaService');
+    } else {
+      service = await import('./perplexityService');
+    }
     const result = await service.generateLatex(transformedData);
     const metrics = calculateCodeMetrics(result.latexCode);
     
