@@ -132,7 +132,7 @@ function App() {
         const croppedBase64 = await cropToRegion(
             originalBase64, 
             detectionResult.boundingBox, 
-            10  // 10px padding
+            30  // 30px padding for safe margins
         );
         
         const croppedDims = await imageCropping.getImageDimensions(croppedBase64);

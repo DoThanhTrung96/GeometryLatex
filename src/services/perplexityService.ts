@@ -178,6 +178,80 @@ function calculateTetrahedronConfidence(data: GeometryData, surfaceVertices: Ver
 }
 
 /**
+ * Fix inverted annotation placements based on actual vertex positions.
+ * AI sometimes confuses coordinate systems and gives opposite placements.
+ * 
+ * @returns number of annotations fixed
+ */
+function fixAnnotationPlacements(data: GeometryData): number {
+    let fixedCount = 0;
+    
+    data.annotations.forEach(annotation => {
+        // Only fix label-type annotations that refer to a single vertex
+        if (!annotation.refersTo || annotation.refersTo.length !== 1) return;
+        if (!annotation.placement) return;
+        
+        const vertexLabel = annotation.refersTo[0];
+        const vertex = data.vertices.find(v => v.label === vertexLabel);
+        if (!vertex) return;
+        
+        // Determine correct placement based on vertex position (0-100 coordinate system)
+        const correctPlacement = determineCorrectPlacement(vertex, data.vertices);
+        
+        // Check if AI placement is inverted
+        const aiPlacement = annotation.placement.toLowerCase();
+        const isInverted = isPlacementInverted(aiPlacement, correctPlacement);
+        
+        if (isInverted) {
+            console.log(`[PostProcess]   ${vertexLabel}: "${aiPlacement}" → "${correctPlacement}" (vertex at x=${vertex.x}, y=${vertex.y})`);
+            annotation.placement = correctPlacement;
+            fixedCount++;
+        }
+    });
+    
+    return fixedCount;
+}
+
+/**
+ * Determine correct label placement based on vertex position relative to center
+ */
+function determineCorrectPlacement(vertex: Vertex, allVertices: Vertex[]): string {
+    // Find center (average position of all vertices)
+    const centerX = allVertices.reduce((sum, v) => sum + v.x, 0) / allVertices.length;
+    const centerY = allVertices.reduce((sum, v) => sum + v.y, 0) / allVertices.length;
+    
+    const dx = vertex.x - centerX;
+    const dy = vertex.y - centerY;
+    
+    // Use larger displacement to determine primary direction
+    if (Math.abs(dx) > Math.abs(dy)) {
+        return dx > 0 ? 'right' : 'left';
+    } else {
+        return dy > 0 ? 'below' : 'above';
+    }
+}
+
+/**
+ * Check if AI placement is inverted from correct placement
+ */
+function isPlacementInverted(aiPlacement: string, correctPlacement: string): boolean {
+    const inversions: Record<string, string> = {
+        'left': 'right',
+        'right': 'left',
+        'above': 'below',
+        'below': 'above',
+        'top': 'bottom',
+        'bottom': 'top'
+    };
+    
+    const normalizedAi = aiPlacement.toLowerCase();
+    const normalizedCorrect = correctPlacement.toLowerCase();
+    
+    // Check if they're opposites
+    return inversions[normalizedAi] === normalizedCorrect || inversions[normalizedCorrect] === normalizedAi;
+}
+
+/**
  * Deduplicate edges - merge edges with same endpoints
  */
 function deduplicateEdges(edges: Edge[]): Edge[] {
@@ -311,23 +385,40 @@ function enforceTetrahedronStructure(data: GeometryData, surfaceVertices: Vertex
     // Determine edge colors and curve directions
     const frontVertices = surfaceVertices.filter(v => v.label !== backVertex.label).map(v => v.label);
     
+    let correctedCount = 0;
     existingEdges.forEach((edge, key) => {
         const connectsToBack = edge.from === backVertex.label || edge.to === backVertex.label;
         
         if (connectsToBack) {
             // Edge to back vertex = internal diagonal = concave = blue
-            edge.color = edge.color || 'blue';
+            const oldColor = edge.color;
+            edge.color = 'blue';  // FORCE correct color
             edge.curveDirection = 'concave';
             edge.curvature = edge.curvature || 0.25;
             edge.geometricRelation = `internal edge to back vertex ${backVertex.label}`;
+            
+            if (oldColor && oldColor !== 'blue') {
+                console.log(`[PostProcess]   Corrected ${edge.from}-${edge.to}: ${oldColor} → blue (internal edge)`);
+                correctedCount++;
+            }
         } else {
             // Edge on front face = convex = red
-            edge.color = edge.color || 'red';
+            const oldColor = edge.color;
+            edge.color = 'red';  // FORCE correct color
             edge.curveDirection = 'convex';
             edge.curvature = edge.curvature || 0.35;
             edge.geometricRelation = 'front face edge';
+            
+            if (oldColor && oldColor !== 'red') {
+                console.log(`[PostProcess]   Corrected ${edge.from}-${edge.to}: ${oldColor} → red (front face)`);
+                correctedCount++;
+            }
         }
     });
+    
+    if (correctedCount > 0) {
+        console.log(`[PostProcess] ✓ Corrected ${correctedCount} edge colors`);
+    }
     
     // Update data.edges with complete set
     data.edges = [...existingEdges.values()];
@@ -354,13 +445,16 @@ export const detectRegion = async (imageBase64: string, mimeType: string): Promi
     }
 
     const prompt = `
-Analyze this image and identify the EXACT region containing the geometric figure.
+Analyze this image and identify the region containing the geometric figure.
 
-TASK: Find the bounding box that tightly encompasses ALL geometric content, including:
+TASK: Find a bounding box that encompasses ALL geometric content WITH GENEROUS MARGINS:
 - All vertices and lines
-- All labels and annotations  
+- All labels and annotations (include space for label text fully visible)
 - All angle markers and measurements
-- EXCLUDE: Document borders, background, watermarks, unrelated text
+- Add margin around the figure (at least 20-30 pixels on all sides)
+- EXCLUDE: Document borders, large empty background, watermarks, unrelated text
+
+IMPORTANT: The box should have breathing room - don't crop too tightly!
 
 COORDINATE SYSTEM:
 - Top-left corner of image = (0, 0)

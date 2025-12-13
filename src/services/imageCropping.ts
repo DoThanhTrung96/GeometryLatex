@@ -17,7 +17,7 @@ import type { BoundingBox } from '../types';
 export async function cropToRegion(
   imageBase64: string,
   boundingBox: BoundingBox,
-  padding: number = 10
+  padding: number = 30
 ): Promise<string> {
   try {
     // Load the original image
