@@ -10,121 +10,32 @@ const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 /**
  * Post-process geometry data to fix common AI analysis mistakes.
  * This provides STABILITY by applying deterministic rules after AI analysis.
+ * 
+ * TWO-TIER APPROACH:
+ * TIER 1 (Always): Safe fixes - deduplication, validation, defaults
+ * TIER 2 (Conditional): Structural fixes - only when confidence >= threshold
  */
 function postProcessGeometryData(data: GeometryData): void {
-    if (!data.edges) return;
+    if (!data.edges || !data.vertices) return;
     
-    const vertices = data.vertices || [];
-    const edges = data.edges;
-    
-    // Detect if this is a 3D inscribed polyhedron (like tetrahedron in sphere)
+    const vertices = data.vertices;
     const hasSphere = data.shapes?.some(s => s.type === 'sphere');
     const is3D = data.dimension === '3d' || hasSphere;
     
-    if (is3D && hasSphere) {
-        // Find center vertex (usually labeled O)
-        const centerVertex = vertices.find(v => 
-            v.spatialRelation?.toLowerCase().includes('center') ||
-            v.label === 'O'
-        );
-        
-        // Find surface vertices (on sphere)
-        const surfaceVertices = vertices.filter(v => 
-            v.spatialRelation?.toLowerCase().includes('surface') ||
-            v.label !== 'O'
-        ).map(v => v.label);
-        
-        console.log(`[PostProcess] 3D sphere detected. Center: ${centerVertex?.label}, Surface vertices: ${surfaceVertices.join(', ')}`);
-        
-        // Analyze edge colors to determine edge types
-        const edgeColors = new Map<string, Edge[]>();
-        edges.forEach(e => {
-            const color = e.color || 'black';
-            if (!edgeColors.has(color)) edgeColors.set(color, []);
-            edgeColors.get(color)!.push(e);
-        });
-        
-        console.log(`[PostProcess] Edge colors found: ${[...edgeColors.keys()].join(', ')}`);
-        
-        // If we have exactly 2 colors and this looks like a tetrahedron (6 edges, 4 surface vertices)
-        if (edgeColors.size === 2 && edges.length === 6 && surfaceVertices.length === 4) {
-            const colors = [...edgeColors.keys()];
-            const group1 = edgeColors.get(colors[0])!;
-            const group2 = edgeColors.get(colors[1])!;
-            
-            // In tetrahedron: 3 edges form one triangular face (outer), 3 edges go to back vertex (inner)
-            // Heuristic: Find the back vertex (one that appears in 3 edges of same color = inner edges)
-            const vertexCountByColor = new Map<string, Map<string, number>>();
-            
-            for (const [color, edgeGroup] of edgeColors) {
-                const counts = new Map<string, number>();
-                edgeGroup.forEach(e => {
-                    counts.set(e.from, (counts.get(e.from) || 0) + 1);
-                    counts.set(e.to, (counts.get(e.to) || 0) + 1);
-                });
-                vertexCountByColor.set(color, counts);
-            }
-            
-            // Find if one color has a vertex that appears 3 times (back vertex for inner edges)
-            let innerColor: string | null = null;
-            let outerColor: string | null = null;
-            let backVertex: string | null = null;
-            
-            for (const [color, counts] of vertexCountByColor) {
-                for (const [vertex, count] of counts) {
-                    if (count === 3) {
-                        // This vertex appears in all 3 edges of this color = likely back vertex
-                        innerColor = color;
-                        backVertex = vertex;
-                        break;
-                    }
-                }
-                if (innerColor) break;
-            }
-            
-            if (innerColor) {
-                outerColor = colors.find(c => c !== innerColor) || null;
-                console.log(`[PostProcess] Detected: Back vertex=${backVertex}, Inner edges=${innerColor}, Outer edges=${outerColor}`);
-            }
-            
-            // Apply curve directions based on detection
-            edges.forEach(edge => {
-                const edgeColor = edge.color || 'black';
-                
-                if (innerColor && outerColor) {
-                    // We detected the pattern
-                    if (edgeColor === innerColor) {
-                        edge.curveDirection = 'concave';
-                        edge.curvature = edge.curvature || 0.25;
-                        edge.geometricRelation = edge.geometricRelation || 'internal edge to back vertex';
-                    } else if (edgeColor === outerColor) {
-                        edge.curveDirection = 'convex';
-                        edge.curvature = edge.curvature || 0.35;
-                        edge.geometricRelation = edge.geometricRelation || 'tetrahedron face edge';
-                    }
-                } else {
-                    // Fallback: use geometricRelation keywords
-                    const relation = (edge.geometricRelation || '').toLowerCase();
-                    if (relation.includes('diagonal') || relation.includes('internal') || relation.includes('interior') || relation.includes('back')) {
-                        edge.curveDirection = 'concave';
-                    } else if (relation.includes('face') || relation.includes('surface') || relation.includes('outer')) {
-                        edge.curveDirection = 'convex';
-                    }
-                }
-                
-                // Ensure curvature has a reasonable default if curveDirection is set
-                if (edge.curveDirection && edge.curveDirection !== 'straight' && !edge.curvature) {
-                    edge.curvature = edge.curveDirection === 'convex' ? 0.35 : 0.25;
-                }
-            });
-            
-            console.log(`[PostProcess] Applied curve directions to ${edges.length} edges`);
-        }
-    }
+    console.log(`\n[PostProcess] ========== STARTING VALIDATION ==========`);
+    console.log(`[PostProcess] Vertices: ${vertices.length}, Edges: ${data.edges.length}, 3D: ${is3D}`);
     
-    // General fixes for any geometry
-    edges.forEach(edge => {
-        // Default curveDirection to 'straight' if not set and curvature is 0 or very low
+    // ===== TIER 1: SAFE FIXES (Always run) =====
+    console.log(`[PostProcess] TIER 1: Safe fixes...`);
+    
+    // 1. Deduplicate edges
+    const deduplicatedEdges = deduplicateEdges(data.edges);
+    console.log(`[PostProcess] ✓ Deduplication: ${deduplicatedEdges.length} edges (removed ${data.edges.length - deduplicatedEdges.length} duplicates)`);
+    data.edges = deduplicatedEdges;
+    
+    // 2. General fixes for any geometry
+    data.edges.forEach(edge => {
+        // Default curveDirection to 'straight' if not set and curvature is low
         if (!edge.curveDirection) {
             if (!edge.curvature || edge.curvature < 0.1) {
                 edge.curveDirection = 'straight';
@@ -135,6 +46,298 @@ function postProcessGeometryData(data: GeometryData): void {
         if (edge.curvature !== undefined) {
             edge.curvature = Math.max(0, Math.min(1, edge.curvature));
         }
+    });
+    console.log(`[PostProcess] ✓ Field validation complete`);
+    
+    // 3. Fix inverted annotation placements
+    if (data.annotations && data.annotations.length > 0) {
+        const fixedCount = fixAnnotationPlacements(data);
+        console.log(`[PostProcess] ✓ Fixed ${fixedCount} inverted label placements`);
+    }
+    
+    // ===== TIER 2: STRUCTURAL FIXES (Confidence-based) =====
+    if (is3D && hasSphere) {
+        console.log(`[PostProcess] TIER 2: Pattern detection...`);
+        
+        const centerVertex = vertices.find(v => 
+            v.spatialRelation?.toLowerCase().includes('center') || v.label === 'O'
+        );
+        
+        const surfaceVertices = vertices.filter(v => 
+            v.spatialRelation?.toLowerCase().includes('surface') || 
+            (v.label !== centerVertex?.label && v.label !== 'O')
+        );
+        
+        console.log(`[PostProcess] Sphere detected. Center: ${centerVertex?.label}, Surface: ${surfaceVertices.map(v => v.label).join(', ')}`);
+        
+        // Check if this looks like a tetrahedron
+        if (surfaceVertices.length === 4) {
+            const confidence = calculateTetrahedronConfidence(data, surfaceVertices);
+            console.log(`[PostProcess] Tetrahedron confidence: ${(confidence * 100).toFixed(1)}%`);
+            
+            if (confidence >= 0.70) {
+                console.log(`[PostProcess] ✓ High confidence - applying tetrahedron structure`);
+                enforceTetrahedronStructure(data, surfaceVertices, centerVertex);
+            } else {
+                console.log(`[PostProcess] ⚠ Low confidence - skipping structural fixes`);
+                console.log(`[PostProcess] → Trusting AI output (may be spherical quadrilateral or other shape)`);
+            }
+        }
+    }
+    
+    console.log(`[PostProcess] Final edge count: ${data.edges.length}`);
+    console.log(`[PostProcess] ========== VALIDATION COMPLETE ==========\n`);
+}
+
+/**
+ * Calculate confidence that this is a tetrahedron (not spherical quadrilateral or other shape).
+ * Uses multiple independent signals to avoid false positives.
+ * 
+ * @returns 0.0-1.0 confidence score (>= 0.70 recommended for enforcement)
+ */
+function calculateTetrahedronConfidence(data: GeometryData, surfaceVertices: Vertex[]): number {
+    let score = 0;
+    const signals: string[] = [];
+    
+    // Signal 1: Explicit "tetrahedron" in description (30% weight - strongest signal)
+    const desc = (data.geometricDescription || '').toLowerCase();
+    if (desc.includes('tetrahedron')) {
+        score += 0.30;
+        signals.push('description mentions tetrahedron (+30%)');
+    } else if (desc.includes('quadrilateral')) {
+        score -= 0.20; // Penalty if explicitly called quadrilateral
+        signals.push('description says quadrilateral (-20%)');
+    }
+    
+    // Signal 2: Shape type explicitly listed as tetrahedron (20% weight)
+    const hasTetrahedronShape = data.shapes?.some(s => 
+        s.type === 'tetrahedron' || s.type === 'polyhedron'
+    );
+    if (hasTetrahedronShape) {
+        score += 0.20;
+        signals.push('shape type is tetrahedron/polyhedron (+20%)');
+    }
+    
+    // Signal 3: Two color groups (15% weight - common pattern)
+    const colorGroups = new Map<string, Edge[]>();
+    data.edges.forEach(e => {
+        const color = e.color || 'black';
+        if (!colorGroups.has(color)) colorGroups.set(color, []);
+        colorGroups.get(color)!.push(e);
+    });
+    if (colorGroups.size === 2) {
+        const sizes = [...colorGroups.values()].map(g => g.length);
+        // Check if roughly equal groups (3-3 or 4-2 split)
+        if (Math.abs(sizes[0] - sizes[1]) <= 1) {
+            score += 0.15;
+            signals.push(`two color groups (${sizes.join('-')} split) (+15%)`);
+        }
+    }
+    
+    // Signal 4: Edge count suggests complete graph (15% weight)
+    const edgeCount = data.edges.length;
+    if (edgeCount === 6) {
+        score += 0.15;
+        signals.push('exactly 6 edges (K4 complete graph) (+15%)');
+    } else if (edgeCount === 4) {
+        score += 0.05; // Weak signal - might be incomplete tetrahedron
+        signals.push('4 edges (possibly incomplete) (+5%)');
+    } else if (edgeCount > 6) {
+        score -= 0.10; // Too many edges for tetrahedron
+        signals.push(`${edgeCount} edges (too many for tetrahedron) (-10%)`);
+    }
+    
+    // Signal 5: "tetrahedron" or "internal/diagonal" in edge relations (10% weight)
+    const edgeRelations = data.edges.map(e => (e.geometricRelation || '').toLowerCase()).join(' ');
+    if (edgeRelations.includes('tetrahedron')) {
+        score += 0.10;
+        signals.push('edge relations mention tetrahedron (+10%)');
+    } else if (edgeRelations.includes('diagonal') || edgeRelations.includes('internal')) {
+        score += 0.05;
+        signals.push('edge relations suggest 3D structure (+5%)');
+    }
+    
+    // Signal 6: Vertex degree distribution (10% weight)
+    const vertexDegrees = new Map<string, number>();
+    data.edges.forEach(e => {
+        vertexDegrees.set(e.from, (vertexDegrees.get(e.from) || 0) + 1);
+        vertexDegrees.set(e.to, (vertexDegrees.get(e.to) || 0) + 1);
+    });
+    const degrees = [...vertexDegrees.values()];
+    const allDegree3 = degrees.every(d => d === 3);
+    if (allDegree3 && degrees.length === 4) {
+        score += 0.10;
+        signals.push('all vertices have degree 3 (K4 property) (+10%)');
+    }
+    
+    // Log all signals
+    console.log(`[PostProcess] Confidence signals:`);
+    signals.forEach(s => console.log(`  - ${s}`));
+    
+    return Math.max(0, Math.min(1, score)); // Clamp to 0-1
+}
+
+/**
+ * Deduplicate edges - merge edges with same endpoints
+ */
+function deduplicateEdges(edges: Edge[]): Edge[] {
+    const edgeMap = new Map<string, Edge[]>();
+    
+    edges.forEach(edge => {
+        // Create normalized key (A-B and B-A are the same edge)
+        const key = [edge.from, edge.to].sort().join('-');
+        if (!edgeMap.has(key)) {
+            edgeMap.set(key, []);
+        }
+        edgeMap.get(key)!.push(edge);
+    });
+    
+    const result: Edge[] = [];
+    
+    edgeMap.forEach((duplicates, key) => {
+        if (duplicates.length === 1) {
+            result.push(duplicates[0]);
+        } else {
+            // Merge duplicate edges - prefer most common color and curveDirection
+            console.log(`[PostProcess] Merging ${duplicates.length} duplicates for edge ${key}`);
+            const merged = mergeDuplicateEdges(duplicates);
+            result.push(merged);
+        }
+    });
+    
+    return result;
+}
+
+/**
+ * Merge multiple edge definitions into one, preferring most reliable values
+ */
+function mergeDuplicateEdges(edges: Edge[]): Edge {
+    const base = edges[0];
+    
+    // Count occurrences of each color and curveDirection
+    const colorCounts = new Map<string, number>();
+    const directionCounts = new Map<string, number>();
+    
+    edges.forEach(e => {
+        const color = e.color || 'black';
+        colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
+        
+        if (e.curveDirection) {
+            directionCounts.set(e.curveDirection, (directionCounts.get(e.curveDirection) || 0) + 1);
+        }
+    });
+    
+    // Pick most common values
+    const mostCommonColor = [...colorCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || base.color;
+    const mostCommonDirection = [...directionCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as Edge['curveDirection'];
+    
+    // Average curvature
+    const avgCurvature = edges.reduce((sum, e) => sum + (e.curvature || 0), 0) / edges.length;
+    
+    return {
+        ...base,
+        color: mostCommonColor,
+        curveDirection: mostCommonDirection || base.curveDirection,
+        curvature: avgCurvature
+    };
+}
+
+/**
+ * Enforce correct tetrahedron structure:
+ * - Must have exactly 6 edges (all pairs of 4 vertices)
+ * - Detect back vertex (leftmost = furthest from camera)
+ * - 3 edges to back vertex = concave (blue)
+ * - 3 edges forming front face = convex (red)
+ */
+function enforceTetrahedronStructure(data: GeometryData, surfaceVertices: Vertex[], centerVertex?: Vertex): void {
+    const labels = surfaceVertices.map(v => v.label);
+    console.log(`[PostProcess] Enforcing tetrahedron structure for vertices: ${labels.join(', ')}`);
+    
+    // Generate all required edges (complete graph K4 = 6 edges)
+    const requiredEdges = new Set<string>();
+    for (let i = 0; i < labels.length; i++) {
+        for (let j = i + 1; j < labels.length; j++) {
+            const key = [labels[i], labels[j]].sort().join('-');
+            requiredEdges.add(key);
+        }
+    }
+    
+    console.log(`[PostProcess] Required edges: ${[...requiredEdges].join(', ')}`);
+    
+    // Check existing edges
+    const existingEdges = new Map<string, Edge>();
+    data.edges.forEach(edge => {
+        const key = [edge.from, edge.to].sort().join('-');
+        if (requiredEdges.has(key)) {
+            existingEdges.set(key, edge);
+        }
+    });
+    
+    console.log(`[PostProcess] Existing edges: ${existingEdges.size}/${requiredEdges.size}`);
+    
+    // Add missing edges
+    const missingEdges: string[] = [];
+    requiredEdges.forEach(key => {
+        if (!existingEdges.has(key)) {
+            const [from, to] = key.split('-');
+            missingEdges.push(key);
+            
+            // Create edge with reasonable defaults
+            const newEdge: Edge = {
+                from,
+                to,
+                style: 'dashed',
+                thickness: 'thin',
+                color: 'black', // Will be determined below
+                geometricRelation: 'tetrahedron edge',
+                isVisible: true,
+                confidence: 0.8
+            };
+            existingEdges.set(key, newEdge);
+        }
+    });
+    
+    if (missingEdges.length > 0) {
+        console.log(`[PostProcess] Added ${missingEdges.length} missing edges: ${missingEdges.join(', ')}`);
+    }
+    
+    // Detect back vertex (leftmost point = furthest from camera in typical projection)
+    const backVertex = surfaceVertices.reduce((leftmost, v) => 
+        v.x < leftmost.x ? v : leftmost
+    , surfaceVertices[0]);
+    
+    console.log(`[PostProcess] Back vertex detected: ${backVertex.label} (x=${backVertex.x})`);
+    
+    // Determine edge colors and curve directions
+    const frontVertices = surfaceVertices.filter(v => v.label !== backVertex.label).map(v => v.label);
+    
+    existingEdges.forEach((edge, key) => {
+        const connectsToBack = edge.from === backVertex.label || edge.to === backVertex.label;
+        
+        if (connectsToBack) {
+            // Edge to back vertex = internal diagonal = concave = blue
+            edge.color = edge.color || 'blue';
+            edge.curveDirection = 'concave';
+            edge.curvature = edge.curvature || 0.25;
+            edge.geometricRelation = `internal edge to back vertex ${backVertex.label}`;
+        } else {
+            // Edge on front face = convex = red
+            edge.color = edge.color || 'red';
+            edge.curveDirection = 'convex';
+            edge.curvature = edge.curvature || 0.35;
+            edge.geometricRelation = 'front face edge';
+        }
+    });
+    
+    // Update data.edges with complete set
+    data.edges = [...existingEdges.values()];
+    
+    // Update geometric description
+    data.geometricDescription = `Tetrahedron ${labels.join('')} inscribed in sphere. Front face: ${frontVertices.join('-')}, back vertex: ${backVertex.label}`;
+    
+    console.log(`[PostProcess] Tetrahedron structure enforced: ${data.edges.length} edges total`);
+    data.edges.forEach(e => {
+        console.log(`  ${e.from}-${e.to}: ${e.color}, ${e.curveDirection}, curvature=${e.curvature}`);
     });
 }
 
@@ -249,6 +452,20 @@ Analyze this geometric diagram image in COMPREHENSIVE DETAIL. Extract ALL visibl
 
 CRITICAL: Be extremely thorough - capture EVERY text annotation, EVERY visual property, EVERY geometric relationship.
 
+⚠️ POLYHEDRON DETECTION RULES - READ CAREFULLY ⚠️
+
+IF you see 4 vertices on a sphere surface:
+  → This is a TETRAHEDRON inscribed in the sphere
+  → A tetrahedron has EXACTLY 6 EDGES (complete graph of 4 vertices)
+  → List ALL 6 edges: A-B, A-C, A-D, B-C, B-D, C-D
+  → DO NOT DUPLICATE edges (each edge appears ONCE with ONE color)
+  → DO NOT describe it as a "quadrilateral" - it's a 3D tetrahedron!
+
+Edge classification for tetrahedron:
+  → Identify the BACK VERTEX (usually leftmost = furthest from camera)
+  → 3 edges connecting TO back vertex = internal (typically blue, concave)
+  → 3 edges forming FRONT FACE = surface edges (typically red, convex)
+
 Your analysis must include:
 
 1. VERTICES - For each point:
@@ -260,27 +477,27 @@ Your analysis must include:
    - spatialRelation (e.g., "on sphere surface", "center of sphere", "above plane", "on circle")
    - confidence (0.0-1.0)
 
-2. EDGES/LINES - For each connection:
+2. EDGES/LINES - For each connection (⚠️ CRITICAL: Each edge ONCE only, NO DUPLICATES):
    - from, to (vertex labels)
    - style (solid, dashed, dotted, thick, double)
    - thickness (very thin, thin, thick, very thick)
    - color (if not black - IMPORTANT: different colors often indicate different edge types!)
    - geometricRelation: Be SPECIFIC about the edge type:
-     * "tetrahedron face edge" = edge on outer face of tetrahedron (connects adjacent vertices)
-     * "diagonal" or "internal edge" = edge that cuts through interior (connects non-adjacent vertices)
+     * "tetrahedron face edge" = edge on outer front face (connects vertices of front triangle)
+     * "internal edge to back vertex" = edge going to the back/hidden vertex (passes through sphere)
      * "radius", "diameter", "chord", "tangent" for circle-related edges
    - isVisible (false for hidden edges in 3D, true by default)
    
    - curveDirection: CRITICAL! Determine from VISUAL APPEARANCE in the image:
      * Look at how the edge VISUALLY curves in the image
-     * "convex" = edge bulges OUTWARD (like following the sphere surface on the OUTSIDE)
-     * "concave" = edge curves INWARD (like going THROUGH the sphere interior)
+     * "convex" = edge bulges OUTWARD (follows the sphere surface on the OUTSIDE/visible side)
+     * "concave" = edge curves INWARD (goes THROUGH the sphere interior to back vertex)
      * "straight" = no visible curve
      
    - DETECTION RULES for tetrahedron-in-sphere:
-     * Edges along the VISIBLE outer silhouette = "convex" (they wrap around the sphere)
-     * Edges going TO/FROM a back vertex (through the sphere) = "concave" (they pass inside)
-     * If colors differ: one color is likely surface edges (convex), other is internal (concave)
+     * Front face edges (forming visible triangle) = "convex" (wrap around sphere exterior)
+     * Edges to back vertex (leftmost point) = "concave" (pass through interior)
+     * If two colors present: typically one color = front face (convex), other = to back vertex (concave)
      
    - curvature (0.0-1.0): magnitude of curve. 0=straight, 0.2-0.4=slight, 0.5+=pronounced
    - confidence (0.0-1.0)

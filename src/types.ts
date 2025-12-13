@@ -136,7 +136,7 @@ export interface GeometryData {
 
 // Additional shape elements (circles, spheres, polyhedra)
 export interface ShapeElement {
-  type: 'circle' | 'sphere' | 'ellipse' | 'arc' | 'polygon' | 'polyhedron';
+  type: 'circle' | 'sphere' | 'ellipse' | 'arc' | 'polygon' | 'polyhedron' | 'tetrahedron';
   center?: string;              // Vertex label for center
   radius?: string;              // Radius value or reference
   vertices?: string[];          // Vertices forming this shape
